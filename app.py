@@ -279,7 +279,7 @@ def home():
   <div class="muted mb-3">Add hitters to your watchlist, then use the HR Board.</div>
 
   <form class="d-flex gap-2" action="/search" method="get">
-    <input class="form-control form-control-lg" name="q" placeholder="Aaron Judge" autofocus>
+    <input class="form-control form-control-lg" name="q" placeholder="Type Here" autofocus>
     <button class="btn btn-primary btn-lg" type="submit">Search</button>
   </form>
 
