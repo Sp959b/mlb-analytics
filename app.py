@@ -307,7 +307,7 @@ def heat_leaderboard(window: int = 7):
   <div class="d-flex justify-content-between align-items-start gap-2">
     <div>
       <div class="fw-semibold">{r["name"]} <span class="muted">({r["season"]})</span></div>
-      <div class="muted small">{r["group"]} • {r["detail"]}</div>
+      <div class="muted small">{r["group"]} - {r["detail"]}</div>
     </div>
     {score_badge}
   </div>
@@ -354,7 +354,7 @@ def search(q: str = ""):
    href="/player/{pid}">
   <div>
     <div class="fw-semibold">{full}</div>
-    <div class="muted small">{pos} • {team}</div>
+    <div class="muted small">{pos} - {team}</div>
   </div>
   <span class="badge text-bg-secondary mono">ID {pid}</span>
 </a>
@@ -472,7 +472,7 @@ def player_season(pid: int, group: str = "hitting", season: int = datetime.now()
 <div class="card-dark">
   <div class="d-flex justify-content-between align-items-center">
     <div>
-      <div class="h5 fw-semibold mb-0">Season {season} • {group.title()}</div>
+      <div class="h5 fw-semibold mb-0">Season {season} - {group.title()}</div>
       <div class="muted">Player <span class="mono">{pid}</span></div>
     </div>
     <a class="btn btn-outline-secondary" href="/player/{pid}?season={season}">Back</a>
@@ -507,7 +507,7 @@ def watchlist():
   <div class="d-flex justify-content-between align-items-start gap-2">
     <div>
       <div class="fw-semibold">{p.get("name")}</div>
-      <div class="muted small">season {p.get("season")} • id {p.get("id")}</div>
+      <div class="muted small">season {p.get("season")} - id {p.get("id")}</div>
     </div>
     <form action="/watchlist/remove" method="post">
       <input type="hidden" name="index" value="{i}">
@@ -674,7 +674,7 @@ def player_rolling(pid: int, season: int = datetime.now().year, window: int = 7)
     body = f"""
 <div class="p-3 bg-white soft-card mb-3">
   <div class="h5 fw-semibold mb-0">Rolling 7/14/30 (Hitting)</div>
-  <div class="muted">Player <span class="mono">{pid}</span> • Season {season}</div>
+  <div class="muted">Player <span class="mono">{pid}</span> - Season {season}</div>
 </div>
 {cards}
 """
@@ -724,7 +724,7 @@ def player_zscores(pid: int, season: int = datetime.now().year):
         cards += f"""
 <div class="p-3 bg-white soft-card mb-2">
   <div class="fw-semibold">Last {w} games</div>
-  <div class="muted small">Z-score: +2 very hot • 0 normal • -2 cold</div>
+  <div class="muted small">Z-score: +2 very hot - 0 normal - -2 cold</div>
 
   <div class="mt-2">
     <div>OPS mean: <strong>{_fmt(ops_m,3)}</strong> <span class="badge text-bg-primary">{fmt_z(ops_z)}</span></div>
@@ -740,7 +740,7 @@ def player_zscores(pid: int, season: int = datetime.now().year):
   <div class="d-flex justify-content-between align-items-center">
     <div>
       <div class="h5 fw-semibold mb-0">Z-Scores 7/14/30 (Hitting)</div>
-      <div class="muted">Player <span class="mono">{pid}</span> • Season {season}</div>
+      <div class="muted">Player <span class="mono">{pid}</span> - Season {season}</div>
     </div>
     <a class="btn btn-outline-secondary" href="/player/{pid}?season={season}">Back</a>
   </div>
@@ -765,7 +765,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
         body = f"""
         <div class="card-dark">
           <div class="h5 fw-semibold mb-2">Today HR Prop Score</div>
-          <div class="muted">Player <span class="mono">{pid}</span> • Season {season}</div>
+          <div class="muted">Player <span class="mono">{pid}</span> - Season {season}</div>
           <hr>
           <div class="text-danger fw-semibold">Missing engine functions:</div>
           <div class="mono">{", ".join(missing)}</div>
@@ -897,7 +897,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
   <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
     <div>
       <div class="h5 fw-semibold mb-0">Today HR Prop Score</div>
-      <div class="muted">Player <span class="mono">{pid}</span> • Season {season} • Window {window} games</div>
+      <div class="muted">Player <span class="mono">{pid}</span> - Season {season} - Window {window} games</div>
     </div>
     <a class="btn btn-outline-secondary" href="/player/{pid}?season={season}">Back</a>
   </div>
@@ -912,7 +912,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
         {heat_badge}
       </div>
       <div class="muted small mt-2">
-        Baseline HR/PA: {p_season:.4f} • Adjusted: {p_adj:.4f}
+        Baseline HR/PA: {p_season:.4f} - Adjusted: {p_adj:.4f}
       </div>
     </div>
   </div>
@@ -925,7 +925,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
         {score_badge}
       </div>
       <div class="muted small mt-2">
-        SP boost: {sp_boost:+.2f} • Park boost: {park_boost:+.2f}
+        SP boost: {sp_boost:+.2f} - Park boost: {park_boost:+.2f}
       </div>
     </div>
   </div>
@@ -936,12 +936,12 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
 
       <div class="mb-2">
         <div class="muted small">Opposing Probable SP</div>
-        <div><strong>{sp_name}</strong> • HR/9: <strong>{sp_hr9_str}</strong> • Mult: <strong>{fmt_mult(sp_mult)}</strong></div>
+        <div><strong>{sp_name}</strong> - HR/9: <strong>{sp_hr9_str}</strong> - Mult: <strong>{fmt_mult(sp_mult)}</strong></div>
       </div>
 
       <div>
         <div class="muted small">Park</div>
-        <div><strong>{venue_name}</strong> • HR Factor: <strong>{park_factor_str}</strong> • Mult: <strong>{fmt_mult(park_mult)}</strong></div>
+        <div><strong>{venue_name}</strong> - HR Factor: <strong>{park_factor_str}</strong> - Mult: <strong>{fmt_mult(park_mult)}</strong></div>
       </div>
 
       <hr>
