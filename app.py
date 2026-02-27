@@ -376,7 +376,6 @@ def search(q: str = ""):
     return layout("Search", body)
 @app.get("/player/{pid}", response_class=HTMLResponse)
 def player_dashboard(pid: int, season: int = datetime.now().year):
-    # Try to display a nicer name if your engine can fetch it; fallback to ID
     name = f"Player {pid}"
     if hasattr(eng, "api_get"):
         try:
@@ -397,13 +396,11 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
 
     <div class="d-flex gap-2 flex-wrap">
 
-      <!-- Season Selector -->
       <form class="d-flex gap-2" action="/player/{pid}" method="get">
         <input class="form-control" name="season" value="{season}" style="max-width:120px;">
         <button class="btn btn-outline-secondary" type="submit">Load season</button>
       </form>
 
-      <!-- Add To Watchlist -->
       <form action="/watchlist/add" method="post">
         <input type="hidden" name="pid" value="{pid}">
         <input type="hidden" name="name" value="{name}">
@@ -414,7 +411,6 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
     </div>
   </div>
 </div>
-"""
 
 <div class="row g-3">
   <div class="col-12 col-md-6">
@@ -426,6 +422,30 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
       </div>
     </div>
   </div>
+
+  <div class="col-12 col-md-6">
+    <div class="card-dark">
+      <div class="fw-semibold mb-2">Trends</div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-warning" href="/player/{pid}/rolling?season={season}">Rolling 7/14/30</a>
+        <a class="btn btn-success" href="/player/{pid}/zscores?season={season}">Z-Scores 7/14/30</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card-dark">
+      <div class="fw-semibold mb-2">Betting Tools</div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-dark" href="/leaderboard/hr-props">HR Props Board (Watchlist)</a>
+        <a class="btn btn-danger" href="/player/{pid}/hr-prop-today?season={season}">Today HR Prop Score</a>
+        <a class="btn btn-outline-dark" href="/watchlist">Manage Watchlist</a>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+    return layout("Player Dashboard", body)
 
   <div class="col-12 col-md-6">
     <div class="card-dark">
