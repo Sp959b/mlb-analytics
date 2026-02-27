@@ -5,7 +5,6 @@ from typing import Any
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from string import Template
 
 # ----- CHANGE THIS IMPORT IF NEEDED -----
 # Rename your big CLI file to mlb_engine.py OR change the import here.
@@ -59,45 +58,45 @@ def layout(title: str, body: str) -> str:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
-
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-
   <style>
     body {{
         font-family: 'Inter', sans-serif;
         background: #0f1115;
         color: #e6e6e6;
     }}
-
     .sidebar {{
+        width: 220px;
         background: #161a22;
+        min-height: 100vh;
+        padding: 20px;
+        position: fixed;
     }}
-
     .sidebar a {{
         color: #aaa;
         text-decoration: none;
         display: block;
         padding: 10px 0;
     }}
-
     .sidebar a:hover {{
         color: white;
     }}
-
+    .main {{
+        margin-left: 240px;
+        padding: 30px;
+    }}
     .card-dark {{
         background: #1b2029;
         border-radius: 16px;
         padding: 20px;
         border: 1px solid rgba(255,255,255,0.05);
     }}
-
     .badge-score {{
         font-size: 1.1rem;
         padding: 6px 10px;
         border-radius: 8px;
     }}
-
     .text-muted {{
         color: #888 !important;
     }}
@@ -106,56 +105,21 @@ def layout(title: str, body: str) -> str:
 
 <body>
 
-<!-- Top Navbar (Mobile Visible) -->
-<nav class="navbar navbar-dark bg-dark d-lg-none">
-  <div class="container-fluid">
-    <span class="navbar-brand fw-bold">MLB Analytics</span>
-    <button class="navbar-toggler" type="button" data-bs-toggle="offcanvas" data-bs-target="#mobileSidebar">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-  </div>
-</nav>
-
-<!-- Sidebar Offcanvas (Mobile) -->
-<div class="offcanvas offcanvas-start text-bg-dark d-lg-none sidebar" tabindex="-1" id="mobileSidebar">
-  <div class="offcanvas-header">
-    <h5 class="offcanvas-title fw-bold">MLB Analytics</h5>
-    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
-  </div>
-  <div class="offcanvas-body">
+<div class="sidebar">
+    <h4 class="fw-bold mb-4">MLB Analytics</h4>
     <a href="/">Dashboard</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
-  </div>
 </div>
 
-<div class="container-fluid">
-  <div class="row">
-
-    <!-- Desktop Sidebar -->
-    <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
-      <h4 class="fw-bold mb-4">MLB Analytics</h4>
-      <a href="/">Dashboard</a>
-      <a href="/watchlist">Watchlist</a>
-      <a href="/leaderboard/hr-props">HR Board</a>
-      <a href="/leaderboard/heat">Heat Board</a>
-    </nav>
-
-    <!-- Main Content -->
-    <main class="col-12 col-lg-10 p-4">
-      <h2 class="fw-bold mb-4">{title}</h2>
-      {body}
-    </main>
-
-  </div>
+<div class="main">
+    <h2 class="fw-bold mb-4">{title}</h2>
+    {body}
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
 </body>
-</html>
-"""
+</html>"""
 
 def badge_for_z(z: float | None) -> str:
     if z is None:
@@ -368,7 +332,7 @@ def search(q: str = ""):
   </form>
 </div>
 
-<div class="card-dark">
+<div class="p-3 bg-white soft-card">
   <div class="fw-semibold mb-2">Results</div>
   <div class="list-group">{items if items else '<div class="muted">No results.</div>'}</div>
 </div>
@@ -403,7 +367,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
 
 <div class="row g-3">
   <div class="col-12 col-md-6">
-    <div class="card-dark">
+    <div class="p-3 bg-white soft-card">
       <div class="fw-semibold mb-2">Season Stats</div>
       <div class="d-grid gap-2">
         <a class="btn btn-primary" href="/player/{pid}/season?group=hitting&season={season}">Hitting</a>
@@ -413,7 +377,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
   </div>
 
   <div class="col-12 col-md-6">
-    <div class="card-dark">
+    <div class="p-3 bg-white soft-card">
       <div class="fw-semibold mb-2">Trends</div>
       <div class="d-grid gap-2">
         <a class="btn btn-warning" href="/player/{pid}/rolling?season={season}">Rolling 7/14/30</a>
@@ -423,7 +387,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
   </div>
 
   <div class="col-12">
-    <div class="card-dark">
+    <div class="p-3 bg-white soft-card">
       <div class="fw-semibold mb-2">Betting Tools</div>
       <div class="d-grid gap-2">
         <a class="btn btn-dark" href="/leaderboard/hr-props">HR Props Board (Watchlist)</a>
@@ -464,7 +428,7 @@ def player_season(pid: int, group: str = "hitting", season: int = datetime.now()
   </div>
 </div>
 
-<div class="card-dark">
+<div class="p-3 bg-white soft-card">
   <table class="table mb-0">
     <tbody>
       {rows}
@@ -748,7 +712,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
 
     if missing:
         body = f"""
-        <div class="card-dark">
+        <div class="p-3 bg-white soft-card">
           <div class="h5 fw-semibold mb-2">Today HR Prop Score</div>
           <div class="muted">Player <span class="mono">{pid}</span> • Season {season}</div>
           <hr>
@@ -764,7 +728,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
     p_season, pa_season, hr_season = eng.season_hr_rate_from_season_stats(pid, season)
     if p_season is None:
         body = f"""
-        <div class="card-dark">
+        <div class="p-3 bg-white soft-card">
           <div class="h5 fw-semibold mb-2">Today HR Prop Score</div>
           <div class="text-danger">No season baseline available (no PA/HR for this season).</div>
           <a class="btn btn-outline-secondary mt-3" href="/player/{pid}?season={season}">Back</a>
@@ -776,7 +740,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
     games = eng.get_player_game_log(pid, season, "hitting") or []
     if len(games) < window:
         body = f"""
-        <div class="card-dark">
+        <div class="p-3 bg-white soft-card">
           <div class="h5 fw-semibold mb-2">Today HR Prop Score</div>
           <div class="muted">Need at least {window} games in game log.</div>
           <a class="btn btn-outline-secondary mt-3" href="/player/{pid}?season={season}">Back</a>
@@ -798,7 +762,7 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
 
     if pa_win < min_pa:
         body = f"""
-        <div class="card-dark">
+        <div class="p-3 bg-white soft-card">
           <div class="h5 fw-semibold mb-2">Today HR Prop Score</div>
           <div class="muted">PA in last {window}: {pa_win} (min {min_pa}). Too small to score.</div>
           <a class="btn btn-outline-secondary mt-3" href="/player/{pid}?season={season}">Back</a>
