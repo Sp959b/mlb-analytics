@@ -394,12 +394,27 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
       <div class="h4 mb-0 fw-semibold">{name}</div>
       <div class="muted">Player ID <span class="mono">{pid}</span></div>
     </div>
-    <form class="d-flex gap-2" action="/player/{pid}" method="get">
-      <input class="form-control" name="season" value="{season}" style="max-width:120px;">
-      <button class="btn btn-outline-secondary" type="submit">Load season</button>
-    </form>
+
+    <div class="d-flex gap-2 flex-wrap">
+
+      <!-- Season Selector -->
+      <form class="d-flex gap-2" action="/player/{pid}" method="get">
+        <input class="form-control" name="season" value="{season}" style="max-width:120px;">
+        <button class="btn btn-outline-secondary" type="submit">Load season</button>
+      </form>
+
+      <!-- Add To Watchlist -->
+      <form action="/watchlist/add" method="post">
+        <input type="hidden" name="pid" value="{pid}">
+        <input type="hidden" name="name" value="{name}">
+        <input type="hidden" name="season" value="{season}">
+        <button class="btn btn-primary" type="submit">+ Watchlist</button>
+      </form>
+
+    </div>
   </div>
 </div>
+"""
 
 <div class="row g-3">
   <div class="col-12 col-md-6">
