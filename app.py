@@ -228,6 +228,7 @@ def layout(title: str, body: str) -> str:
     <a href="/">Dashboard</a>
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
+    <a href="/today-hitters">Today's Hitters</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
@@ -243,6 +244,7 @@ def layout(title: str, body: str) -> str:
       <a href="/">Dashboard</a>
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
+      <a href="/today-hitters">Today's Hitters</a>
       <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
@@ -365,6 +367,59 @@ def parse_mlb_utc_to_la(iso_utc: str) -> str:
         return dt_la.strftime("%-I:%M %p PT")
     except Exception:
         return "tbd"
+
+MLB_BASE = "https://statsapi.mlb.com"
+LA_TZ = ZoneInfo("America/Los_Angeles")
+
+def mlb_get(path: str, params: dict | None = None) -> dict:
+    r = requests.get(f"{MLB_BASE}{path}", params=params or {}, timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def today_yyyy_mm_dd() -> str:
+    return datetime.now(LA_TZ).strftime("%Y-%m-%d")
+
+def fmt_time_pt(iso_utc: str) -> str:
+    if not iso_utc:
+        return "tbd"
+    try:
+        dt_utc = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
+        dt_pt = dt_utc.astimezone(LA_TZ)
+        return dt_pt.strftime("%-I:%M %p PT")
+    except Exception:
+        return "tbd"
+
+def get_today_games(day: str) -> list[dict]:
+    sched = mlb_get("/api/v1/schedule", params={"sportId": 1, "date": day, "hydrate": "venue,probablePitcher"})
+    dates = sched.get("dates") or []
+    return (dates[0].get("games") if dates else []) or []
+
+def extract_lineup_hitters(feed: dict, side: str) -> list[dict]:
+    """
+    side: 'home' or 'away'
+    Returns list of hitters with pid/name/batOrder/pos.
+    """
+    out = []
+    box = (feed.get("liveData") or {}).get("boxscore") or {}
+    teams = box.get("teams") or {}
+    t = teams.get(side) or {}
+    batters = t.get("batters") or []  # list of playerIds in batting order (usually)
+    players = box.get("players") or {}
+
+    for pid in batters:
+        p = players.get(f"ID{pid}") or {}
+        person = p.get("person") or {}
+        name = person.get("fullName") or f"ID {pid}"
+        bo = p.get("battingOrder")  # string like "100", "200"...
+        pos = (p.get("position") or {}).get("abbreviation") or ""
+        # If battingOrder missing, still include
+        out.append({
+            "pid": int(pid),
+            "name": name,
+            "battingOrder": bo or "",
+            "pos": pos,
+        })
+    return out
 
 # ----------------------------
 # Routes
@@ -1172,6 +1227,138 @@ document.addEventListener("DOMContentLoaded", function() {{
 </script>
 """
     return layout("Today Edge Board", body)
+    
+@app.get("/today-hitters", response_class=HTMLResponse)
+def today_hitters(date: str = ""):
+    day = (date or "").strip() or today_yyyy_mm_dd()
+    season = int(day.split("-")[0])
+
+    games = get_today_games(day)
+
+    rows_html = ""
+    total_hitters = 0
+
+    for g in games:
+        game_pk = g.get("gamePk")
+        home = ((g.get("teams") or {}).get("home") or {}).get("team") or {}
+        away = ((g.get("teams") or {}).get("away") or {}).get("team") or {}
+        home_name = home.get("name") or "Home"
+        away_name = away.get("name") or "Away"
+
+        venue = (g.get("venue") or {}).get("name") or "Venue tbd"
+        start_pt = fmt_time_pt(g.get("gameDate") or "")
+
+        # probable pitchers (optional)
+        pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
+        pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
+        pp_home_name = pp_home.get("fullName") or "tbd"
+        pp_away_name = pp_away.get("fullName") or "tbd"
+
+        hitters_home, hitters_away = [], []
+        lineup_status = "Lineups not posted yet"
+
+        if game_pk:
+            try:
+                feed = mlb_get(f"/api/v1.1/game/{game_pk}/feed/live")
+                hitters_home = extract_lineup_hitters(feed, "home")
+                hitters_away = extract_lineup_hitters(feed, "away")
+                if hitters_home or hitters_away:
+                    lineup_status = "Lineups posted"
+            except Exception:
+                pass
+
+        def hitters_list_html(hitters: list[dict]) -> str:
+            if not hitters:
+                return f"<div class='dark-muted small'>{lineup_status}</div>"
+            items = ""
+            for h in hitters:
+                pid = h["pid"]
+                nm = h["name"]
+                total = "" if not h["battingOrder"] else f" (BO {h['battingOrder']})"
+                items += f"""
+<div class="d-flex justify-content-between align-items-center py-1 border-bottom border-light border-opacity-10">
+  <div>
+    <a class="link-light fw-semibold" href="/player/{pid}?season={season}">{nm}</a>
+    <span class="dark-muted small">{h.get('pos','')}{total}</span>
+  </div>
+  <form action="/watchlist/add" method="post" class="m-0">
+    <input type="hidden" name="pid" value="{pid}">
+    <input type="hidden" name="name" value="{nm}">
+    <input type="hidden" name="season" value="{season}">
+    <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+  </form>
+</div>
+"""
+            return items
+
+        total_hitters += len(hitters_home) + len(hitters_away)
+
+        rows_html += f"""
+<div class="card-dark mb-3 game-card" data-game="{away_name.lower()} {home_name.lower()}">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-0">{away_name} at {home_name}</div>
+      <div class="dark-muted small">{day} - {start_pt} - {venue}</div>
+      <div class="dark-muted small">Probables: {pp_away_name} (away) - {pp_home_name} (home)</div>
+    </div>
+    <a class="btn btn-outline-light btn-sm" href="/today-edge">Today Edge</a>
+  </div>
+
+  <hr class="border-light opacity-25">
+
+  <div class="row g-3">
+    <div class="col-12 col-md-6">
+      <div class="fw-semibold mb-1">{away_name} hitters</div>
+      {hitters_list_html(hitters_away)}
+    </div>
+    <div class="col-12 col-md-6">
+      <div class="fw-semibold mb-1">{home_name} hitters</div>
+      {hitters_list_html(hitters_home)}
+    </div>
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today-hitters" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date</label>
+      <input class="form-control" name="date" value="{day}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Load</button>
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search games</label>
+      <input id="gameSearch" class="form-control" placeholder="Dodgers, Yankees...">
+    </div>
+    <div class="col-12 col-md-3 dark-muted small">
+      Hitters listed when lineups are posted.
+      Added hitters go to Watchlist + Today Edge.
+    </div>
+  </form>
+</div>
+
+<div class="dark-muted small mb-2">Games: {len(games)} | Hitters found: {total_hitters}</div>
+
+{rows_html if rows_html else "<div class='card-dark dark-muted'>No games found.</div>"}
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("gameSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = input.value.toLowerCase();
+    document.querySelectorAll(".game-card").forEach(function(card) {{
+      const t = card.getAttribute("data-game") || "";
+      card.style.display = (t.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today's Hitters", body)
     
 @app.get("/player/{pid}/hr-prop-today", response_class=HTMLResponse)
 def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: int = 14, min_pa: int = 20):
