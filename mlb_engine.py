@@ -980,7 +980,113 @@ def pitcher_hr_multiplier(sp_hr9: float | None, baseline_hr9: float = 1.20) -> f
         return None
     return max(0.6, min(1.6, sp_hr9 / baseline_hr9))
 
+# -----------------------------
+# HIT props helpers (>=1 hit)
+# -----------------------------
+def season_hit_rate_from_season_stats(player_id: int, season: int) -> tuple[float | None, int | None, int | None]:
+    """
+    Returns (H/AB, AB, H) from season hitting stats.
+    """
+    st = get_player_stats(player_id, "season", "hitting", season=season)
+    if not st:
+        return (None, None, None)
+    try:
+        ab = int(st.get("atBats"))
+        h = int(st.get("hits"))
+        if ab <= 0:
+            return (None, ab, h)
+        return (h / ab, ab, h)
+    except Exception:
+        return (None, None, None)
 
+
+def last_n_hit_rate_from_gamelog(games: list[dict], last_n: int) -> tuple[float | None, int | None, int | None]:
+    """
+    Returns (H/AB, AB, H) over last_n games using gameLog stats.
+    """
+    if not games:
+        return (None, None, None)
+
+    h_sum = 0.0
+    ab_sum = 0.0
+    for g in games[:last_n]:
+        try:
+            h_sum += float(g.get("hits") or 0)
+        except Exception:
+            pass
+        try:
+            ab_sum += float(g.get("atBats") or 0)
+        except Exception:
+            pass
+
+    if ab_sum <= 0:
+        return (None, int(ab_sum), int(h_sum))
+    return (h_sum / ab_sum, int(ab_sum), int(h_sum))
+
+
+def pitcher_whip(pitcher_id: int, season: int) -> float | None:
+    st = get_player_stats(pitcher_id, "season", "pitching", season=season)
+    if not st:
+        return None
+    try:
+        w = float(st.get("whip"))
+        # sanity clamp
+        if w <= 0:
+            return None
+        return w
+    except Exception:
+        return None
+
+
+def pitcher_hit_multiplier_from_whip(whip: float | None, baseline_whip: float = 1.30) -> float | None:
+    """
+    crude multiplier: WHIP above baseline -> more hits allowed
+    clamped so it can't explode
+    """
+    if whip is None or baseline_whip <= 0:
+        return None
+    m = whip / baseline_whip
+    return max(0.75, min(1.25, m))
+
+
+def hits_today_context(player_id: int, season: int, date_yyyy_mm_dd: str) -> dict | None:
+    """
+    Reuses your existing schedule/venue/probablePitcher extraction.
+    Adds opponent SP WHIP and a multiplier.
+    """
+    team_id = get_player_team_id(player_id)
+    if not team_id:
+        return None
+
+    game = get_team_game_on_date(team_id, date_yyyy_mm_dd)
+    if not game:
+        return None
+
+    sp_id, sp_name = extract_opponent_probable_pitcher(game, team_id)
+    venue_id, venue_name = get_venue_info(game)
+
+    sp_whip = pitcher_whip(sp_id, season) if sp_id else None
+    sp_mult = pitcher_hit_multiplier_from_whip(sp_whip, baseline_whip=1.30)
+
+    # NOTE: you only have HR park factors. For hits, either omit park entirely,
+    # or apply a tiny damped adjustment (optional).
+    park_map = load_park_hr_factors()
+    park_mult_hr = park_hr_multiplier(venue_id, park_map)  # HR-based
+    park_mult = None
+    if park_mult_hr is not None:
+        # damp it heavily so it's not pretending to be a true hit factor
+        park_mult = 1.0 + 0.20 * (park_mult_hr - 1.0)
+
+    return {
+        "sp_id": sp_id,
+        "sp_name": sp_name,
+        "sp_whip": sp_whip,
+        "venue_id": venue_id,
+        "venue_name": venue_name,
+        "sp_mult": sp_mult,
+        "park_mult": park_mult,
+    }
+    
 def hr_props_today_context(player_id: int, season: int, date_yyyy_mm_dd: str) -> dict | None:
     team_id = get_player_team_id(player_id)
     if not team_id:
