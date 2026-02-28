@@ -1116,7 +1116,43 @@ def hr_props_today_context(player_id: int, season: int, date_yyyy_mm_dd: str) ->
         "sp_mult": sp_mult,
     }
 
+def season_k_per_ip_from_season_stats(pitcher_id: int, season: int) -> tuple[float | None, float | None, int | None]:
+    """
+    Returns (K/IP, IP_float, K_total) from season pitching stats.
+    """
+    st = get_player_stats(pitcher_id, "season", "pitching", season=season)
+    if not st:
+        return (None, None, None)
+    try:
+        k = int(st.get("strikeOuts"))
+        ip = ip_str_to_float(st.get("inningsPitched"))
+        if ip is None or ip <= 0:
+            return (None, ip, k)
+        return (k / ip, ip, k)
+    except Exception:
+        return (None, None, None)
 
+def last_n_k_per_ip_from_gamelog(games: list[dict], last_n: int) -> tuple[float | None, float | None, int | None]:
+    """
+    Returns (K/IP, IP_float, K_total) over last_n games using gameLog pitching stats.
+    """
+    if not games:
+        return (None, None, None)
+
+    k_sum = 0.0
+    ip_sum = 0.0
+    for g in games[:last_n]:
+        try:
+            k_sum += float(g.get("strikeOuts") or 0)
+        except Exception:
+            pass
+        ip = ip_str_to_float(g.get("inningsPitched"))
+        if ip is not None:
+            ip_sum += float(ip)
+
+    if ip_sum <= 0:
+        return (None, ip_sum, int(k_sum))
+    return (k_sum / ip_sum, ip_sum, int(k_sum))
 def show_hr_props_leaderboard():
     wl = load_watchlist()
     players = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
