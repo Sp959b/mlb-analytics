@@ -306,7 +306,10 @@ def h(s: Any) -> str:
 
 def lower_attr(s: Any) -> str:
     return h(s).lower()
-
+    
+def hs(x) -> str:
+    return h("" if x is None else str(x))
+    
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
@@ -2144,13 +2147,13 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
             items += f"""
 <div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
   <div>
-    <div class="fw-semibold">{h(p["name"])} <span class="dark-muted small">{h(p["pos"])}</span></div>
-    <div class="dark-muted small">OPS {h(p["ops"])} | PA {h(p["pa"])} | AVG {h(p["avg"])}</div>
+    <div class="fw-semibold">{hs(p["name"])} <span class="dark-muted small">{hs(p["pos"])}</span></div>
+    <div class="dark-muted small">OPS {hs(p["ops"])} | PA {h(p["pa"])} | AVG {hs(p["avg"])}</div>
   </div>
   <form action="/watchlist/add" method="post" class="m-0">
-    <input type="hidden" name="pid" value="{p["pid"]}">
-    <input type="hidden" name="name" value="{h(p["name"])}">
-    <input type="hidden" name="season" value="{season}">
+    <input type="hidden" name="pid" value="{hs(p["pid"])}">
+    <input type="hidden" name="name" value="{hs(p["name"])}">
+    <input type="hidden" name="season" value="{hs(season)}">
     <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
   </form>
 </div>
@@ -2159,7 +2162,7 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
         cards_html += f"""
 <div class="card-dark mb-3">
   <div class="d-flex justify-content-between align-items-center">
-    <div class="h5 fw-semibold mb-0">{h(team_name)}</div>
+    <div class="h5 fw-semibold mb-0">{hs(team_name)}</div>
     <div class="dark-muted small">Top {per_team} by season OPS (min PA {min_pa})</div>
   </div>
   <hr class="border-light opacity-25">
@@ -2172,15 +2175,15 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
   <form class="row g-2 align-items-end" action="/suggest/hitters" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date</label>
-      <input class="form-control" name="date" value="{h(day)}">
+      <input class="form-control" name="date" value="{hs(day)}">
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label dark-muted small mb-0">Per team</label>
-      <input class="form-control" name="per_team" value="{h(per_team)}">
+      <input class="form-control" name="per_team" value="{hs(per_team)}">
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label dark-muted small mb-0">Min PA</label>
-      <input class="form-control" name="min_pa" value="{h(min_pa)}">
+      <input class="form-control" name="min_pa" value="{hs(min_pa)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Suggest</button>
