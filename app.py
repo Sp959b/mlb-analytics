@@ -304,8 +304,6 @@ def badge_for_z(z: Optional[float]) -> str:
 # ----------------------------
 # Safer HTML injection helpers
 # ----------------------------
-def h(s: Any) -> str:
-    return html.escape("" if s is None else str(s), quote=True)
 
 def lower_attr(s: Any) -> str:
     return h(s).lower()
