@@ -1437,7 +1437,251 @@ document.addEventListener("DOMContentLoaded", function() {{
     page = layout("Today's Hitters", body)
     mem_set(k, page, ttl=30)
     return HTMLResponse(page)
+    
+@app.get("/leaderboard/hr-props", response_class=HTMLResponse)
+def hr_props_leaderboard(window: int = 7, min_pa: int = 20):
+    # normalize params
+    try:
+        window = int(window)
+    except Exception:
+        window = 7
+    try:
+        min_pa = int(min_pa)
+    except Exception:
+        min_pa = 20
 
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
+    today = today_yyyy_mm_dd()
+
+    if window not in (7, 14, 30):
+        window = 7
+
+    rows = []
+    for p in hitters:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+
+        # baseline (guard against engine raising)
+        try:
+            p_season, _, _ = eng.season_hr_rate_from_season_stats(pid, season)
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error season baseline: {type(e).__name__}"})
+            continue
+
+        if p_season is None:
+            rows.append({"name": name, "season": season, "z": None, "detail": "no season baseline"})
+            continue
+
+        # game log (guard)
+        try:
+            games = eng.get_player_game_log(pid, season, "hitting") or []
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error game log: {type(e).__name__}"})
+            continue
+
+        if len(games) < window:
+            rows.append({"name": name, "season": season, "z": None, "detail": "not enough games"})
+            continue
+
+        pa_win = safe_int(sum(float(g.get("plateAppearances", 0) or 0) for g in games[:window]))
+        hr_win = safe_int(sum(float(g.get("homeRuns", 0) or 0) for g in games[:window]))
+
+        if pa_win < int(min_pa):
+            rows.append({"name": name, "season": season, "z": None, "detail": f"PA too low ({pa_win} < {min_pa})"})
+            continue
+
+        # optional context (guard)
+        ctx_str = ""
+        p_adj = float(p_season)
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+            if ctx:
+                park_mult = ctx.get("park_mult")
+                sp_mult = ctx.get("sp_mult")
+                if park_mult is not None:
+                    try:
+                        p_adj *= float(park_mult)
+                    except Exception:
+                        pass
+                if sp_mult is not None:
+                    try:
+                        p_adj *= float(sp_mult)
+                    except Exception:
+                        pass
+                ctx_str = f" | SP {ctx.get('sp_name','?')} HR/9={ctx.get('sp_hr9','n/a')} | Park {ctx.get('venue_name','?')}"
+
+        p_adj = min(max(p_adj, 0.00001), 0.25)
+
+        # z calc (guard)
+        try:
+            z = eng.hr_binomial_z(hr_win, pa_win, p_adj)
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error z-score: {type(e).__name__}"})
+            continue
+
+        detail = f"HR {hr_win}/PA {pa_win} | season HR/PA {p_season:.4f} | adj {p_adj:.4f}{ctx_str}"
+        rows.append({"name": name, "season": season, "z": z, "detail": detail})
+
+    # None z to bottom
+    rows.sort(key=lambda r: (r["z"] is None, -(r["z"] or -1e9)))
+
+    cards = ""
+    for r in rows:
+        cards += f"""
+<div class="p-3 soft-card mb-2">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div>
+      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
+      <div class="text-secondary small">{h(r["detail"])}</div>
+    </div>
+    {badge_for_z(r["z"])}
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/hr-props" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Min PA</label>
+      <input class="form-control" name="min_pa" value="{h(min_pa)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-6 text-secondary small">
+      Guide: <span class="badge text-bg-success">z &gt;= +1.5</span> hot
+      <span class="badge text-bg-danger">z &lt;= -1.5</span> cold
+    </div>
+  </form>
+</div>
+{cards if cards else '<div class="p-3 soft-card text-secondary">No hitters in watchlist yet.</div>'}
+"""
+    return layout("HR Props Board", body)
+    
+@app.get("/leaderboard/heat", response_class=HTMLResponse)
+def heat_leaderboard(window: int = 7):
+    try:
+        window = int(window)
+    except Exception:
+        window = 7
+
+    wl = load_watchlist()
+    players = wl.get("players", [])
+    if window not in (7, 14, 30):
+        window = 7
+
+    rows = []
+    for p in players:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+        group = p.get("group", "hitting")
+
+        # game log (guard)
+        try:
+            games = eng.get_player_game_log(pid, season, group) or []
+        except Exception as e:
+            rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error game log: {type(e).__name__}"})
+            continue
+
+        if len(games) < window:
+            rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "not enough games"})
+            continue
+
+        # hitter heat (guard)
+        if group == "hitting" and hasattr(eng, "hitter_heat_score_z"):
+            try:
+                info = (eng.hitter_heat_score_z(games, windows=(window,)) or {}).get(window)
+            except Exception as e:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error hitter heat: {type(e).__name__}"})
+                continue
+
+            if info:
+                score = info.get("score")
+                comps = info.get("components") or {}
+                detail = f"OPS {fmt_z(comps.get('OPS_z'))} | HR {fmt_z(comps.get('HR_z'))} | H {fmt_z(comps.get('H_z'))} | K {fmt_z(comps.get('K_z'))}"
+                rows.append({"name": name, "season": season, "group": group, "score": score, "detail": detail})
+            else:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "n/a"})
+            continue
+
+        # pitcher heat (guard)
+        if group == "pitching" and hasattr(eng, "pitcher_heat_score_z"):
+            try:
+                info = (eng.pitcher_heat_score_z(games, windows=(window,)) or {}).get(window)
+            except Exception as e:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error pitcher heat: {type(e).__name__}"})
+                continue
+
+            if info:
+                score = info.get("score")
+                comps = info.get("components") or {}
+                detail = f"K/IP {fmt_z(comps.get('KIP_z'))} | ERA {fmt_z(comps.get('ERA_z'))} | BB {fmt_z(comps.get('BB_z'))}"
+                rows.append({"name": name, "season": season, "group": group, "score": score, "detail": detail})
+            else:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "n/a"})
+            continue
+
+        rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "heat functions missing in engine"})
+
+    rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or -1e9)))
+
+    cards = ""
+    for r in rows:
+        score_badge = (
+            '<span class="badge text-bg-secondary fs-6">n/a</span>'
+            if r["score"] is None
+            else f'<span class="badge text-bg-warning fs-6">{float(r["score"]):+.2f}</span>'
+        )
+        cards += f"""
+<div class="p-3 soft-card mb-2">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div>
+      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
+      <div class="text-secondary small">{h(r["group"])} - {h(r["detail"])}</div>
+    </div>
+    {score_badge}
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/heat" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-4 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-6 text-secondary small">
+      Heat Score = weighted Z-score blend (higher = hotter).
+    </div>
+  </form>
+</div>
+{cards if cards else '<div class="p-3 soft-card text-secondary">Watchlist is empty.</div>'}
+"""
+    return layout("Heat Board", body)
+    
 @app.get("/leaderboard/parks", response_class=HTMLResponse)
 def parks_board(window: int = 30):
     if window not in (7, 14, 30):
