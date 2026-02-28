@@ -1756,7 +1756,141 @@ def parks_board(window: int = 30):
 </div>
 """
     return layout("Park Leaderboard", body)
+    
+@app.get("/today-ks", response_class=HTMLResponse)
+def today_ks_board(window: int = 14, ip_proj: float = 5.5):
+    wl = load_watchlist()
+    pitchers = [p for p in wl.get("players", []) if p.get("group") == "pitching"]
 
+    try:
+        window = int(window)
+    except Exception:
+        window = 14
+    if window not in (7, 14, 30):
+        window = 14
+
+    try:
+        ip_proj = float(ip_proj)
+    except Exception:
+        ip_proj = 5.5
+    ip_proj = max(1.0, min(9.0, ip_proj))
+
+    rows = []
+    for p in pitchers:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+
+        # season baseline
+        try:
+            k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
+        except Exception as e:
+            rows.append({"name": name, "k_exp": None, "detail": f"error season baseline: {type(e).__name__}"})
+            continue
+
+        if k_ip_season is None:
+            rows.append({"name": name, "k_exp": None, "detail": "missing season K/IP"})
+            continue
+
+        # recent form (optional blend)
+        try:
+            games = eng.get_player_game_log(pid, season, "pitching") or []
+        except Exception:
+            games = []
+
+        k_ip_recent = None
+        if games:
+            try:
+                k_ip_recent, ip_recent, k_recent = eng.last_n_k_per_ip_from_gamelog(games, window)
+            except Exception:
+                k_ip_recent = None
+
+        k_ip_base = float(k_ip_season)
+        if k_ip_recent is not None:
+            # blend: emphasize recent a bit but keep stable
+            k_ip_base = 0.60 * float(k_ip_recent) + 0.40 * float(k_ip_season)
+
+        # expected Ks
+        k_exp = k_ip_base * ip_proj
+
+        detail = f"season K/IP {k_ip_season:.2f}"
+        if k_ip_recent is not None:
+            detail += f" | last{window} K/IP {k_ip_recent:.2f}"
+        detail += f" | IPproj {ip_proj:.1f}"
+
+        rows.append({"name": name, "k_exp": k_exp, "detail": detail})
+
+    rows.sort(key=lambda r: (r["k_exp"] is None, -(r["k_exp"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        k_str = "n/a" if r["k_exp"] is None else f"{r['k_exp']:.1f}"
+        trs += f"""
+<tr class="ks-row" data-name="{h(r['name']).lower()}">
+  <td class="fw-semibold">{h(r['name'])}</td>
+  <td class="text-secondary small">{h(r['detail'])}</td>
+  <td class="text-center fw-semibold">{k_str}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today-ks" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Projected IP</label>
+      <input class="form-control" name="ip_proj" value="{h(ip_proj)}">
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="ksSearch" class="form-control" placeholder="Type a pitcher name...">
+    </div>
+    <div class="col-12 col-md-4 dark-muted small">
+      Expected Ks = blended K/IP * projected IP. Add pitchers to watchlist (group=pitching).
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Pitcher</th>
+          <th>Notes</th>
+          <th class="text-center">Exp K</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="3" class="dark-muted">No pitchers in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("ksSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".ks-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Pitcher K Board", body)
+    
 @app.get("/today-hits", response_class=HTMLResponse)
 def today_hits_board(ab_proj: float = 3.8):
     wl = load_watchlist()
