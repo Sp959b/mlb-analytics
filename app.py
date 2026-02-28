@@ -15,6 +15,8 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 import mlb_engine as eng  # your engine module
+import requests
+from zoneinfo import ZoneInfo
 
 # ----------------------------
 # App + storage
@@ -159,6 +161,7 @@ def layout(title: str, body: str) -> str:
   </div>
   <div class="offcanvas-body">
     <a href="/">Dashboard</a>
+    <a href="/today">Today</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
@@ -172,6 +175,7 @@ def layout(title: str, body: str) -> str:
     <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
       <h4 class="fw-bold mb-4">MLB Analytics</h4>
       <a href="/">Dashboard</a>
+      <a href="/today">Today</a>
       <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
@@ -265,7 +269,35 @@ def _fmt_delta(x: Optional[float], d: int = 3) -> str:
         return "n/a"
     sign = "+" if x > 0 else ""
     return f"{sign}{x:.{d}f}"
+LA_TZ = ZoneInfo("America/Los_Angeles")
 
+def _safe_date_yyyy_mm_dd(s: str) -> str:
+    s = (s or "").strip()
+    if not s:
+        return datetime.now(LA_TZ).strftime("%Y-%m-%d")
+    # very small validation
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except Exception:
+        return datetime.now(LA_TZ).strftime("%Y-%m-%d")
+
+def mlb_api_get(path: str, params: dict | None = None) -> dict:
+    url = f"https://statsapi.mlb.com{path}"
+    r = requests.get(url, params=params or {}, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+def parse_mlb_utc_to_la(iso_utc: str) -> str:
+    # MLB often returns "2026-02-27T20:10:00Z"
+    if not iso_utc:
+        return "tbd"
+    try:
+        dt_utc = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
+        dt_la = dt_utc.astimezone(LA_TZ)
+        return dt_la.strftime("%-I:%M %p PT")
+    except Exception:
+        return "tbd"
 
 # ----------------------------
 # Routes
@@ -727,7 +759,96 @@ def player_rolling(pid: int, season: int = datetime.now().year):
 """
     return layout("Rolling 7/14/30", body)
 
+@app.get("/today", response_class=HTMLResponse)
+def today_games(date: str = ""):
+    day = _safe_date_yyyy_mm_dd(date)
+    year = int(day.split("-")[0])
 
+    data = mlb_api_get(
+        "/api/v1/schedule",
+        params={
+            "sportId": 1,
+            "date": day,
+            "hydrate": "team,venue,probablePitcher"
+        },
+    )
+
+    dates = data.get("dates") or []
+    games = (dates[0].get("games") if dates else []) or []
+
+    cards = ""
+    for g in games:
+        home = ((g.get("teams") or {}).get("home") or {}).get("team") or {}
+        away = ((g.get("teams") or {}).get("away") or {}).get("team") or {}
+        home_name = home.get("name") or "Home"
+        away_name = away.get("name") or "Away"
+
+        venue = (g.get("venue") or {}).get("name") or "Venue tbd"
+        start = parse_mlb_utc_to_la(g.get("gameDate") or "")
+
+        pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
+        pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
+        pp_home_name = pp_home.get("fullName") or "tbd"
+        pp_away_name = pp_away.get("fullName") or "tbd"
+        pp_home_id = pp_home.get("id")
+        pp_away_id = pp_away.get("id")
+
+        link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
+        link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
+
+        def pitcher_line(name: str, link: str | None) -> str:
+            if link:
+                return f'<a class="link-light" href="{link}">{name}</a>'
+            return f'<span class="dark-muted">{name}</span>'
+
+        cards += f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-1">{away_name} at {home_name}</div>
+      <div class="dark-muted small">{day} - {start} - {venue}</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-light btn-sm" href="/search">Search players</a>
+      <a class="btn btn-outline-light btn-sm" href="/watchlist">Watchlist</a>
+    </div>
+  </div>
+
+  <hr class="border-light opacity-25">
+
+  <div class="row g-2">
+    <div class="col-12 col-md-6">
+      <div class="dark-muted small">Away probable</div>
+      <div class="fw-semibold">{pitcher_line(pp_away_name, link_away)}</div>
+    </div>
+    <div class="col-12 col-md-6">
+      <div class="dark-muted small">Home probable</div>
+      <div class="fw-semibold">{pitcher_line(pp_home_name, link_home)}</div>
+    </div>
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date (YYYY-MM-DD)</label>
+      <input class="form-control" name="date" value="{day}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Load</button>
+    </div>
+    <div class="col-12 col-md-7 dark-muted small">
+      Shows schedule + probable pitchers. Times shown in Pacific Time.
+    </div>
+  </form>
+</div>
+
+{cards if cards else '<div class="card-dark dark-muted">No games found for this date.</div>'}
+"""
+    return layout("Today Games", body)
+    
 @app.get("/player/{pid}/zscores", response_class=HTMLResponse)
 def player_zscores(pid: int, season: int = datetime.now().year):
     group = "hitting"
