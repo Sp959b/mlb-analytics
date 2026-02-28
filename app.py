@@ -18,6 +18,24 @@ import mlb_engine as eng  # your engine module
 import requests
 from zoneinfo import ZoneInfo
 
+import time
+from typing import Callable
+
+_MEM_CACHE: dict[str, tuple[float, dict]] = {}  # key -> (expires_ts, data)
+
+def mem_cache_get(key: str) -> dict | None:
+    hit = _MEM_CACHE.get(key)
+    if not hit:
+        return None
+    exp, data = hit
+    if time.time() > exp:
+        _MEM_CACHE.pop(key, None)
+        return None
+    return data
+
+def mem_cache_set(key: str, data: dict, ttl_seconds: int) -> None:
+    _MEM_CACHE[key] = (time.time() + ttl_seconds, data)
+
 # ----------------------------
 # App + storage
 # ----------------------------
