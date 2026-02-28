@@ -7,7 +7,7 @@ MLB Analytics (FastAPI) - Render-safe single-file app
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -134,10 +134,119 @@ def model_hr_game_prob(p_hr_per_pa: float, pa_proj: float = 4.2) -> float:
     pa = max(1.0, float(pa_proj))
     return 1.0 - (1.0 - p) ** pa
 
+PARK_CACHE_DIR = Path("/tmp/park_cache")
+PARK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+def cache_read(path: Path) -> dict | None:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+def cache_write(path: Path, obj: dict) -> None:
+    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
 
 # ----------------------------
 # UI helpers
 # ----------------------------
+def _date_str(dt_obj: datetime) -> str:
+    return dt_obj.strftime("%Y-%m-%d")
+
+def fetch_game_total_hr(game_pk: int) -> int | None:
+    """
+    Returns total HR in game (away HR + home HR), or None if missing.
+    """
+    try:
+        box = mlb_get(f"/api/v1/game/{int(game_pk)}/boxscore")
+        teams = (box.get("teams") or {})
+        away = (teams.get("away") or {}).get("teamStats", {}).get("batting", {})
+        home = (teams.get("home") or {}).get("teamStats", {}).get("batting", {})
+        hr_away = away.get("homeRuns")
+        hr_home = home.get("homeRuns")
+        if hr_away is None or hr_home is None:
+            return None
+        return int(hr_away) + int(hr_home)
+    except Exception:
+        return None
+
+def park_leaderboard(window_days: int = 30) -> list[dict]:
+    """
+    Aggregates completed games in the last window_days by venue.
+    Uses caching so it does not hammer the API on every page load.
+    """
+    if window_days not in (7, 14, 30):
+        window_days = 30
+
+    today = datetime.now(LA_TZ).date()
+    start = today - timedelta(days=window_days)
+    end = today
+
+    cache_key = f"parks_{_date_str(datetime.combine(start, datetime.min.time()))}_{_date_str(datetime.combine(end, datetime.min.time()))}.json"
+    cache_path = PARK_CACHE_DIR / cache_key
+
+    cached = cache_read(cache_path)
+    if cached and isinstance(cached.get("rows"), list):
+        return cached["rows"]
+
+    # Pull schedule for date range
+    sched = mlb_get(
+        "/api/v1/schedule",
+        params={
+            "sportId": 1,
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+            "hydrate": "venue",
+        },
+    )
+
+    dates = sched.get("dates") or []
+    venue_map: dict[str, dict] = {}
+
+    # Loop through games; only count Final games
+    for d in dates:
+        games = d.get("games") or []
+        for g in games:
+            status = ((g.get("status") or {}).get("detailedState") or "")
+            if status != "Final":
+                continue
+
+            game_pk = g.get("gamePk")
+            venue = (g.get("venue") or {})
+            venue_name = venue.get("name") or "Unknown Park"
+            venue_id = venue.get("id") or ""
+
+            total_hr = fetch_game_total_hr(game_pk) if game_pk else None
+            if total_hr is None:
+                continue
+
+            k = f"{venue_id}|{venue_name}"
+            rec = venue_map.get(k)
+            if not rec:
+                rec = {"venue": venue_name, "venue_id": venue_id, "games": 0, "hr_total": 0}
+                venue_map[k] = rec
+
+            rec["games"] += 1
+            rec["hr_total"] += int(total_hr)
+
+    rows = []
+    for rec in venue_map.values():
+        games = rec["games"]
+        hr_total = rec["hr_total"]
+        hr_per_game = (hr_total / games) if games > 0 else 0.0
+        rows.append({
+            "venue": rec["venue"],
+            "games": games,
+            "hr_total": hr_total,
+            "hr_per_game": hr_per_game,
+        })
+
+    rows.sort(key=lambda r: (-r["hr_per_game"], -r["games"], r["venue"]))
+
+    cache_write(cache_path, {"rows": rows})
+    return rows
+    
 def layout(title: str, body: str) -> str:
     return f"""<!doctype html>
 <html>
@@ -229,6 +338,7 @@ def layout(title: str, body: str) -> str:
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
+    <a href="/leaderboard/parks">Parks</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
@@ -245,6 +355,7 @@ def layout(title: str, body: str) -> str:
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
+      <a href="/leaderboard/parks">Parks</a>
       <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
@@ -1611,3 +1722,63 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: in
 </div>
 """
     return layout("Today HR Prop Score", body)
+@app.get("/leaderboard/parks", response_class=HTMLResponse)
+def parks_board(window: int = 30):
+    if window not in (7, 14, 30):
+        window = 30
+
+    rows = park_leaderboard(window_days=window)
+
+    trs = ""
+    for i, r in enumerate(rows, start=1):
+        trs += f"""
+<tr>
+  <td class="text-secondary">{i}</td>
+  <td class="fw-semibold">{r['venue']}</td>
+  <td class="text-center">{r['games']}</td>
+  <td class="text-center">{r['hr_total']}</td>
+  <td class="text-center fw-semibold">{r['hr_per_game']:.2f}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/parks" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7 days</option>
+        <option value="14" {"selected" if window==14 else ""}>14 days</option>
+        <option value="30" {"selected" if window==30 else ""}>30 days</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-8 dark-muted small">
+      Ranks parks by HR per game using completed MLB games in the selected window.
+      Data is cached to keep page loads fast.
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Park</th>
+          <th class="text-center">Games</th>
+          <th class="text-center">HR</th>
+          <th class="text-center">HR/G</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="5" class="dark-muted">No data yet for this window.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Park Leaderboard", body)
