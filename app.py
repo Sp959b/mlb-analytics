@@ -572,6 +572,128 @@ def park_leaderboard(window_days: int = 30) -> list[dict]:
     mem_set(k, rows, ttl=60 * 60)
     return rows
     
+def hot_teams(window_days: int = 14) -> list[dict]:
+    if window_days not in (7, 14, 30):
+        window_days = 14
+
+    # mem cache
+    k = f"board:hot_teams:{window_days}:{today_yyyy_mm_dd()}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    today = datetime.now(LA_TZ).date()
+    start = today - timedelta(days=window_days)
+    end = today
+
+    cache_path = TEAM_CACHE_DIR / f"hot_teams_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.json"
+    disk = cache_read(cache_path)
+    if disk and isinstance(disk.get("rows"), list):
+        mem_set(k, disk["rows"], ttl=60 * 30)  # 30 min
+        return disk["rows"]
+
+    sched = schedule_range(start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+
+    agg: dict[int, dict] = {}
+
+    for d in (sched.get("dates") or []):
+        for g in (d.get("games") or []):
+            status = ((g.get("status") or {}).get("detailedState") or "")
+            if status != "Final":
+                continue
+
+            game_pk = g.get("gamePk")
+            if not game_pk:
+                continue
+
+            box = get_boxscore_cached(int(game_pk))
+            if not box:
+                continue
+
+            teams = (box.get("teams") or {})
+
+            for side in ("away", "home"):
+                t = teams.get(side) or {}
+                team = (t.get("team") or {})
+                team_id = team.get("id")
+                team_name = team.get("name") or side.title()
+
+                batting = (t.get("teamStats") or {}).get("batting") or {}
+                hr = batting.get("homeRuns")
+                r = batting.get("runs")
+                ops = batting.get("ops")
+                pa = batting.get("plateAppearances")
+
+                if team_id is None or hr is None or r is None:
+                    continue
+
+                tid = int(team_id)
+
+                rec = agg.get(tid)
+                if not rec:
+                    rec = {
+                        "team": team_name,
+                        "team_id": tid,
+                        "games": 0,
+                        "hr_total": 0,
+                        "r_total": 0,
+                        "pa_total": 0,
+                        "ops_pa_sum": 0.0,
+                        "ops_games_sum": 0.0,
+                        "ops_games_n": 0,
+                    }
+                    agg[tid] = rec
+
+                rec["games"] += 1
+                rec["hr_total"] += int(hr)
+                rec["r_total"] += int(r)
+
+                # OPS: prefer PA-weighted average when possible
+                try:
+                    ops_f = float(ops) if ops is not None else None
+                except Exception:
+                    ops_f = None
+
+                try:
+                    pa_i = int(pa) if pa is not None else None
+                except Exception:
+                    pa_i = None
+
+                if ops_f is not None and pa_i is not None and pa_i > 0:
+                    rec["pa_total"] += pa_i
+                    rec["ops_pa_sum"] += ops_f * pa_i
+                elif ops_f is not None:
+                    rec["ops_games_sum"] += ops_f
+                    rec["ops_games_n"] += 1
+
+    rows: list[dict] = []
+    for rec in agg.values():
+        g = rec["games"] or 0
+        hr_g = (rec["hr_total"] / g) if g else 0.0
+        r_g = (rec["r_total"] / g) if g else 0.0
+
+        ops_val = None
+        if rec["pa_total"] > 0:
+            ops_val = rec["ops_pa_sum"] / rec["pa_total"]
+        elif rec["ops_games_n"] > 0:
+            ops_val = rec["ops_games_sum"] / rec["ops_games_n"]
+
+        rows.append({
+            "team": rec["team"],
+            "games": g,
+            "hr_total": rec["hr_total"],
+            "r_total": rec["r_total"],
+            "hr_g": hr_g,
+            "r_g": r_g,
+            "ops": ops_val,
+        })
+
+    rows.sort(key=lambda r: (-(r["hr_g"]), -(r["ops"] if r["ops"] is not None else -999), -(r["r_g"])))
+
+    cache_write(cache_path, {"rows": rows})
+    mem_set(k, rows, ttl=60 * 30)
+    return rows
+    
 # ----------------------------
 # App + UI layout
 # ----------------------------
