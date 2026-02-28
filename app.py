@@ -769,17 +769,34 @@ def hot_teams(window_days: int = 14) -> list[dict]:
 # ----------------------------
 @app.get("/", response_class=HTMLResponse)
 def home():
-
-    # Pull previews
+    # Pull previews (never crash the dashboard)
     try:
         edge_preview = today_edge_board_data(limit=5)
-    except:
+    except Exception:
         edge_preview = []
 
     try:
         hot_teams_preview = hot_teams(window_days=7)[:5]
-    except:
+    except Exception:
         hot_teams_preview = []
+
+    edge_html = (
+        "".join(
+            f"<div>{r.get('name','')} <span class='dark-muted small'>{r.get('edge','')}</span></div>"
+            for r in edge_preview
+        )
+        if edge_preview
+        else "<div class='dark-muted'>No data yet.</div>"
+    )
+
+    teams_html = (
+        "".join(
+            f"<div>{r.get('team','')} — HR/G {float(r.get('hr_g',0) or 0):.2f}</div>"
+            for r in hot_teams_preview
+        )
+        if hot_teams_preview
+        else "<div class='dark-muted'>No data yet.</div>"
+    )
 
     body = f"""
 <div class="card-dark mb-4 p-4">
@@ -789,10 +806,12 @@ def home():
   </div>
 
   <div class="mt-4 d-flex gap-3 flex-wrap">
-    <a class="btn btn-danger btn-lg" href="/leaderboard/today-edge">Today Edge Board</a>
+    <a class="btn btn-danger btn-lg" href="/today-edge">Today Edge Board</a>
     <a class="btn btn-primary btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
     <a class="btn btn-warning btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
     <a class="btn btn-outline-light btn-lg" href="/leaderboard/parks">Park Board</a>
+    <a class="btn btn-outline-light btn-lg" href="/today">Today Games</a>
+    <a class="btn btn-outline-light btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
   </div>
 </div>
 
@@ -805,34 +824,21 @@ def home():
 </div>
 
 <div class="row g-3">
-
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3">
       <div class="fw-semibold mb-2">Top HR Edges Today</div>
-      {
-        "".join(
-            f"<div>{r.get('name','')} <span class='dark-muted small'>{r.get('edge','')}</span></div>"
-            for r in edge_preview
-        ) if edge_preview else "<div class='dark-muted'>No data yet.</div>"
-      }
+      {edge_html}
     </div>
   </div>
 
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3">
       <div class="fw-semibold mb-2">Hottest Teams (7d)</div>
-      {
-        "".join(
-            f"<div>{r.get('team','')} — HR/G {r.get('hr_g',0):.2f}</div>"
-            for r in hot_teams_preview
-        ) if hot_teams_preview else "<div class='dark-muted'>No data yet.</div>"
-      }
+      {teams_html}
     </div>
   </div>
-
 </div>
 """
-
     return layout("MLB Analytics Dashboard", body)
 
 @app.get("/search", response_class=HTMLResponse)
