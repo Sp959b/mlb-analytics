@@ -68,6 +68,71 @@ def is_in_watchlist(pid: int, season: int, group: str = "hitting") -> bool:
         if int(p.get("id", -1)) == int(pid) and int(p.get("season", -1)) == int(season) and p.get("group") == group:
             return True
     return False
+ODDS_PATH = Path("/tmp/odds.json")  # change to /var/data/odds.json if you later add a Render disk
+
+def load_odds() -> dict:
+    try:
+        if ODDS_PATH.exists():
+            return json.loads(ODDS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {"odds": {}}
+
+def save_odds(obj: dict) -> None:
+    ODDS_PATH.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+def odds_key(pid: int, date: str) -> str:
+    return f"{int(pid)}|{date}"
+
+def set_odds(pid: int, date: str, american: int) -> None:
+    obj = load_odds()
+    obj.setdefault("odds", {})
+    obj["odds"][odds_key(pid, date)] = {
+        "odds": int(american),
+        "ts": datetime.now().isoformat(timespec="seconds"),
+    }
+    save_odds(obj)
+
+def clear_odds(pid: int, date: str) -> None:
+    obj = load_odds()
+    k = odds_key(pid, date)
+    if k in obj.get("odds", {}):
+        del obj["odds"][k]
+        save_odds(obj)
+
+def get_odds(pid: int, date: str) -> int | None:
+    obj = load_odds()
+    rec = obj.get("odds", {}).get(odds_key(pid, date))
+    if not rec:
+        return None
+    try:
+        return int(rec.get("odds"))
+    except Exception:
+        return None
+
+def american_to_implied_prob(odds: int | None) -> float | None:
+    if odds is None:
+        return None
+    try:
+        o = int(odds)
+    except Exception:
+        return None
+    if o == 0:
+        return None
+    if o > 0:
+        return 100.0 / (o + 100.0)
+    return (-o) / ((-o) + 100.0)
+
+def fmt_pct(p: float | None) -> str:
+    if p is None:
+        return "n/a"
+    return f"{p*100:.1f}%"
+
+def model_hr_game_prob(p_hr_per_pa: float, pa_proj: float = 4.2) -> float:
+    # P(HR >= 1) = 1 - (1 - p)^PA
+    p = max(0.0000001, min(0.25, float(p_hr_per_pa)))
+    pa = max(1.0, float(pa_proj))
+    return 1.0 - (1.0 - p) ** pa
 
 
 # ----------------------------
@@ -161,6 +226,7 @@ def layout(title: str, body: str) -> str:
   </div>
   <div class="offcanvas-body">
     <a href="/">Dashboard</a>
+    <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
@@ -175,6 +241,7 @@ def layout(title: str, body: str) -> str:
     <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
       <h4 class="fw-bold mb-4">MLB Analytics</h4>
       <a href="/">Dashboard</a>
+      <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
@@ -917,7 +984,26 @@ def player_zscores(pid: int, season: int = datetime.now().year):
 {cards}
 """
     return layout("Z-Scores", body)
+@app.post("/odds/set")
+def odds_set(
+    pid: int = Form(...),
+    date: str = Form(...),
+    odds: int = Form(...),
+    next: str = Form("/today-edge"),
+):
+    date = (date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    set_odds(int(pid), date, int(odds))
+    return RedirectResponse(next, status_code=303)
 
+@app.post("/odds/clear")
+def odds_clear(
+    pid: int = Form(...),
+    date: str = Form(...),
+    next: str = Form("/today-edge"),
+):
+    date = (date or "").strip() or datetime.now().strftime("%Y-%m-%d")
+    clear_odds(int(pid), date)
+    return RedirectResponse(next, status_code=303)
 
 @app.get("/player/{pid}/hr-prop-today", response_class=HTMLResponse)
 def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: int = 14, min_pa: int = 20):
