@@ -731,6 +731,7 @@ def layout(title: str, body: str) -> str:
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
     <a href="/today-hits">Today Hits</a>
+    <a href="/today-ks">Today Ks</a>
     <a href="/leaderboard/parks">Parks</a>
     <a href="/leaderboard/teams-hot">Hot Teams</a>
     <a href="/leaderboard/hr-props">HR Board</a>
@@ -748,6 +749,7 @@ def layout(title: str, body: str) -> str:
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
       <a href="/today-hits">Today Hits</a>
+      <a href="/today-ks">Today Ks</a>
       <a href="/leaderboard/parks">Parks</a>
       <a href="/leaderboard/teams-hot">Hot Teams</a>
       <a href="/leaderboard/hr-props">HR Board</a>
