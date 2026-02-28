@@ -394,31 +394,56 @@ def get_today_games(day: str) -> list[dict]:
     dates = sched.get("dates") or []
     return (dates[0].get("games") if dates else []) or []
 
+NAME_CACHE: dict[int, str] = {}
+
 def extract_lineup_hitters(feed: dict, side: str) -> list[dict]:
     """
     side: 'home' or 'away'
-    Returns list of hitters with pid/name/batOrder/pos.
+    Returns list of hitters with pid/name/battingOrder/pos.
     """
     out = []
+
     box = (feed.get("liveData") or {}).get("boxscore") or {}
     teams = box.get("teams") or {}
     t = teams.get(side) or {}
-    batters = t.get("batters") or []  # list of playerIds in batting order (usually)
+    batters = t.get("batters") or []
     players = box.get("players") or {}
 
     for pid in batters:
-        p = players.get(f"ID{pid}") or {}
+        pid_int = int(pid)
+        p = players.get(f"ID{pid_int}") or {}
+
         person = p.get("person") or {}
-        name = person.get("fullName") or f"ID {pid}"
-        bo = p.get("battingOrder")  # string like "100", "200"...
+        name = person.get("fullName")
+
+        # If missing, try cache, then fetch from /people/{id}
+        if not name:
+            name = NAME_CACHE.get(pid_int)
+
+        if not name:
+            try:
+                pdata = mlb_get(f"/api/v1/people/{pid_int}")
+                people = pdata.get("people") or []
+                if people:
+                    name = people[0].get("fullName")
+            except Exception:
+                name = None
+
+        if not name:
+            name = f"ID {pid_int}"
+
+        NAME_CACHE[pid_int] = name
+
+        bo = p.get("battingOrder")  # like "100", "200"...
         pos = (p.get("position") or {}).get("abbreviation") or ""
-        # If battingOrder missing, still include
+
         out.append({
-            "pid": int(pid),
+            "pid": pid_int,
             "name": name,
             "battingOrder": bo or "",
             "pos": pos,
         })
+
     return out
 
 # ----------------------------
