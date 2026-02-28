@@ -613,7 +613,7 @@ def home():
 
     edge_html = (
         "".join(
-            f"<div>{h(r.get('name',''))} <span class='dark-muted small'>{h(r.get('edge',''))}</span></div>"
+            f"<div>{hs(r.get('name',''))} <span class='dark-muted small'>{hs(r.get('edge',''))}</span></div>"
             for r in edge_preview
         )
         if edge_preview
@@ -622,7 +622,7 @@ def home():
 
     teams_html = (
         "".join(
-            f"<div>{h(r.get('team',''))} — HR/G {float(r.get('hr_g',0) or 0):.2f}</div>"
+            f"<div>{hs(r.get('team',''))} — HR/G {float(r.get('hr_g',0) or 0):.2f}</div>"
             for r in hot_teams_preview
         )
         if hot_teams_preview
@@ -692,17 +692,17 @@ def search(q: str = ""):
 <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
    href="/player/{int(pid)}">
   <div>
-    <div class="fw-semibold">{h(full)}</div>
-    <div class="small text-secondary">{h(pos)} - {h(team)}</div>
+    <div class="fw-semibold">{hs(full)}</div>
+    <div class="small text-secondary">{hs(pos)} - {hs(team)}</div>
   </div>
-  <span class="badge text-bg-secondary mono">ID {h(pid)}</span>
+  <span class="badge text-bg-secondary mono">ID {hs(pid)}</span>
 </a>
 """
 
     body = f"""
 <div class="p-3 soft-card mb-3">
   <form class="d-flex gap-2" action="/search" method="get">
-    <input class="form-control form-control-lg" name="q" value="{h(q)}" placeholder="Aaron Judge">
+    <input class="form-control form-control-lg" name="q" value="{hs(q)}" placeholder="Aaron Judge">
     <button class="btn btn-primary btn-lg" type="submit">Search</button>
   </form>
 </div>
@@ -734,7 +734,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
         else f"""
 <form action="/watchlist/add" method="post">
   <input type="hidden" name="pid" value="{pid}">
-  <input type="hidden" name="name" value="{h(name)}">
+  <input type="hidden" name="name" value="{hs(name)}">
   <input type="hidden" name="season" value="{season}">
   <button class="btn btn-primary" type="submit">+ Watchlist</button>
 </form>
@@ -745,7 +745,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
 <div class="p-3 soft-card mb-3">
   <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
     <div>
-      <div class="h4 mb-0 fw-semibold">{h(name)}</div>
+      <div class="h4 mb-0 fw-semibold">{hs(name)}</div>
       <div class="muted">Player ID <span class="mono">{pid}</span></div>
     </div>
 
@@ -812,13 +812,13 @@ def player_season(pid: int, group: str = "hitting", season: int = datetime.now()
 
     rows = ""
     for k in keys:
-        rows += f"<tr><td class='dark-muted'>{h(k)}</td><td class='fw-semibold'>{h(st.get(k, '-'))}</td></tr>"
+        rows += f"<tr><td class='dark-muted'>{hs(k)}</td><td class='fw-semibold'>{hs(st.get(k, '-'))}</td></tr>"
 
     body = f"""
 <div class="card-dark mb-3">
   <div class="d-flex justify-content-between align-items-center">
     <div>
-      <div class="h5 fw-semibold mb-0">Season {season} - {h(group.title())}</div>
+      <div class="h5 fw-semibold mb-0">Season {season} - {hs(group.title())}</div>
       <div class="dark-muted">Player <span class="mono">{pid}</span></div>
     </div>
     <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
@@ -849,8 +849,8 @@ def watchlist():
 <div class="p-3 soft-card mb-2">
   <div class="d-flex justify-content-between align-items-start gap-2">
     <div>
-      <div class="fw-semibold">{h(p.get("name","-"))}</div>
-      <div class="muted small">season {h(p.get("season","-"))} - id {h(p.get("id","-"))}</div>
+      <div class="fw-semibold">{hs(p.get("name","-"))}</div>
+      <div class="muted small">season {hs(p.get("season","-"))} - id {hs(p.get("id","-"))}</div>
     </div>
     <form action="/watchlist/remove" method="post">
       <input type="hidden" name="index" value="{i}">
@@ -972,25 +972,25 @@ def today_edge_board(pa_proj: float = 4.2):
 
         trs += f"""
 <tr class="edge-row" data-name="{lower_attr(r['name'])}">
-  <td class="fw-semibold">{h(r['name'])}</td>
-  <td class="text-secondary small">{h(r['ctx'])}</td>
+  <td class="fw-semibold">{hs(r['name'])}</td>
+  <td class="text-secondary small">{hs(r['ctx'])}</td>
   <td class="text-center">{fmt_pct(r['model_p'])}</td>
   <td class="text-center">{fmt_pct(r['implied'])}</td>
-  <td class="text-center fw-semibold">{h(edge_str)}</td>
+  <td class="text-center fw-semibold">{hs(edge_str)}</td>
   <td style="min-width:260px;">
     <div class="d-flex gap-2 flex-wrap">
       <form action="/odds/set" method="post" class="d-flex gap-2">
         <input type="hidden" name="pid" value="{r['pid']}">
-        <input type="hidden" name="date" value="{h(today)}">
-        <input type="hidden" name="next" value="/today-edge?pa_proj={h(pa_proj)}">
-        <input class="form-control form-control-sm" name="odds" value="{h(odds_val)}" placeholder="+320 / -110" style="max-width:120px;">
+        <input type="hidden" name="date" value="{hs(today)}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={hs(pa_proj)}">
+        <input class="form-control form-control-sm" name="odds" value="{hs(odds_val)}" placeholder="+320 / -110" style="max-width:120px;">
         <button class="btn btn-outline-secondary btn-sm" type="submit">Save</button>
       </form>
 
       <form action="/odds/clear" method="post">
         <input type="hidden" name="pid" value="{r['pid']}">
-        <input type="hidden" name="date" value="{h(today)}">
-        <input type="hidden" name="next" value="/today-edge?pa_proj={h(pa_proj)}">
+        <input type="hidden" name="date" value="{hs(today)}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={hs(pa_proj)}">
         <button class="btn btn-outline-danger btn-sm" type="submit">Clear</button>
       </form>
     </div>
@@ -1009,7 +1009,7 @@ def today_edge_board(pa_proj: float = 4.2):
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Projected PA</label>
       <form action="/today-edge" method="get" class="d-flex gap-2">
-        <input class="form-control" name="pa_proj" value="{h(pa_proj)}">
+        <input class="form-control" name="pa_proj" value="{hs(pa_proj)}">
         <button class="btn btn-primary" type="submit">Apply</button>
       </form>
     </div>
@@ -1094,15 +1094,15 @@ def today_games(date: str = ""):
 
         def pitcher_line(name: str, link: str | None) -> str:
             if link:
-                return f'<a class="link-light" href="{h(link)}">{h(name)}</a>'
-            return f'<span class="dark-muted">{h(name)}</span>'
+                return f'<a class="link-light" href="{hs(link)}">{hs(name)}</a>'
+            return f'<span class="dark-muted">{hs(name)}</span>'
 
         cards += f"""
 <div class="card-dark mb-3">
   <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
     <div>
-      <div class="h5 fw-semibold mb-1">{h(away_name)} at {h(home_name)}</div>
-      <div class="dark-muted small">{h(day)} - {h(start)} - {h(venue)}</div>
+      <div class="h5 fw-semibold mb-1">{hs(away_name)} at {hs(home_name)}</div>
+      <div class="dark-muted small">{hs(day)} - {hs(start)} - {hs(venue)}</div>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-outline-light btn-sm" href="/search">Search players</a>
@@ -1130,7 +1130,7 @@ def today_games(date: str = ""):
   <form class="row g-2 align-items-end" action="/today" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date (YYYY-MM-DD)</label>
-      <input class="form-control" name="date" value="{h(day)}">
+      <input class="form-control" name="date" value="{hs(day)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Load</button>
@@ -1192,7 +1192,7 @@ def today_hitters(date: str = ""):
 
         def hitters_list_html(hitters: list[dict]) -> str:
             if not hitters:
-                return f"<div class='dark-muted small'>{h(lineup_status)}</div>"
+                return f"<div class='dark-muted small'>{hs(lineup_status)}</div>"
             items = ""
             for hh in hitters:
                 pid = hh["pid"]
@@ -1201,12 +1201,12 @@ def today_hitters(date: str = ""):
                 items += f"""
 <div class="d-flex justify-content-between align-items-center py-1 border-bottom border-light border-opacity-10">
   <div>
-    <a class="link-light fw-semibold" href="/player/{pid}?season={season}">{h(nm)}</a>
-    <span class="dark-muted small">{h(hh.get('pos',''))}{h(total)}</span>
+    <a class="link-light fw-semibold" href="/player/{pid}?season={season}">{hs(nm)}</a>
+    <span class="dark-muted small">{hs(hh.get('pos',''))}{hs(total)}</span>
   </div>
   <form action="/watchlist/add" method="post" class="m-0">
     <input type="hidden" name="pid" value="{pid}">
-    <input type="hidden" name="name" value="{h(nm)}">
+    <input type="hidden" name="name" value="{hs(nm)}">
     <input type="hidden" name="season" value="{season}">
     <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
   </form>
@@ -1220,9 +1220,9 @@ def today_hitters(date: str = ""):
 <div class="card-dark mb-3 game-card" data-game="{lower_attr(away_name + ' ' + home_name)}">
   <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
     <div>
-      <div class="h5 fw-semibold mb-0">{h(away_name)} at {h(home_name)}</div>
-      <div class="dark-muted small">{h(day)} - {h(start_pt)} - {h(venue)}</div>
-      <div class="dark-muted small">Probables: {h(pp_away_name)} (away) - {h(pp_home_name)} (home)</div>
+      <div class="h5 fw-semibold mb-0">{hs(away_name)} at {hs(home_name)}</div>
+      <div class="dark-muted small">{hs(day)} - {hs(start_pt)} - {hs(venue)}</div>
+      <div class="dark-muted small">Probables: {hs(pp_away_name)} (away) - {hs(pp_home_name)} (home)</div>
     </div>
     <a class="btn btn-outline-light btn-sm" href="/today-edge">Today Edge</a>
   </div>
@@ -1231,11 +1231,11 @@ def today_hitters(date: str = ""):
 
   <div class="row g-3">
     <div class="col-12 col-md-6">
-      <div class="fw-semibold mb-1">{h(away_name)} hitters</div>
+      <div class="fw-semibold mb-1">{hs(away_name)} hitters</div>
       {hitters_list_html(hitters_away)}
     </div>
     <div class="col-12 col-md-6">
-      <div class="fw-semibold mb-1">{h(home_name)} hitters</div>
+      <div class="fw-semibold mb-1">{hs(home_name)} hitters</div>
       {hitters_list_html(hitters_home)}
     </div>
   </div>
@@ -1247,7 +1247,7 @@ def today_hitters(date: str = ""):
   <form class="row g-2 align-items-end" action="/today-hitters" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date</label>
-      <input class="form-control" name="date" value="{h(day)}">
+      <input class="form-control" name="date" value="{hs(day)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Load</button>
@@ -1383,8 +1383,8 @@ def hr_props_leaderboard(window: int = 7, min_pa: int = 20):
 <div class="p-3 soft-card mb-2">
   <div class="d-flex justify-content-between align-items-start gap-2">
     <div>
-      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
-      <div class="text-secondary small">{h(r["detail"])}</div>
+      <div class="fw-semibold">{hs(r["name"])} <span class="text-secondary">({hs(r["season"])})</span></div>
+      <div class="text-secondary small">{hs(r["detail"])}</div>
     </div>
     {badge_for_z(r["z"])}
   </div>
@@ -1404,7 +1404,7 @@ def hr_props_leaderboard(window: int = 7, min_pa: int = 20):
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label muted small mb-0">Min PA</label>
-      <input class="form-control" name="min_pa" value="{h(min_pa)}">
+      <input class="form-control" name="min_pa" value="{hs(min_pa)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Refresh</button>
@@ -1498,8 +1498,8 @@ def heat_leaderboard(window: int = 7):
 <div class="p-3 soft-card mb-2">
   <div class="d-flex justify-content-between align-items-start gap-2">
     <div>
-      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
-      <div class="text-secondary small">{h(r["group"])} - {h(r["detail"])}</div>
+      <div class="fw-semibold">{hs(r["name"])} <span class="text-secondary">({hs(r["season"])})</span></div>
+      <div class="text-secondary small">{hs(r["group"])} - {hs(r["detail"])}</div>
     </div>
     {score_badge}
   </div>
@@ -1541,7 +1541,7 @@ def parks_board(window: int = 30):
         trs += f"""
 <tr>
   <td class="text-secondary">{i}</td>
-  <td class="fw-semibold">{h(r['venue'])}</td>
+  <td class="fw-semibold">{hs(r['venue'])}</td>
   <td class="text-center">{int(r['games'])}</td>
   <td class="text-center">{int(r['hr_total'])}</td>
   <td class="text-center fw-semibold">{float(r['hr_per_game']):.2f}</td>
@@ -1659,9 +1659,9 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     for r in rows:
         k_str = "n/a" if r["k_exp"] is None else f"{r['k_exp']:.1f}"
         trs += f"""
-<tr class="ks-row" data-name="{h(r['name']).lower()}">
-  <td class="fw-semibold">{h(r['name'])}</td>
-  <td class="text-secondary small">{h(r['detail'])}</td>
+<tr class="ks-row" data-name="{hs(r['name']).lower()}">
+  <td class="fw-semibold">{hs(r['name'])}</td>
+  <td class="text-secondary small">{hs(r['detail'])}</td>
   <td class="text-center fw-semibold">{k_str}</td>
 </tr>
 """
@@ -1679,7 +1679,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label dark-muted small mb-0">Projected IP</label>
-      <input class="form-control" name="ip_proj" value="{h(ip_proj)}">
+      <input class="form-control" name="ip_proj" value="{hs(ip_proj)}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label dark-muted small mb-0">Search</label>
@@ -1781,10 +1781,10 @@ def today_hits_board(ab_proj: float = 3.8):
     trs = ""
     for r in rows:
         trs += f"""
-<tr class="hit-row" data-name="{h(r['name']).lower()}">
-  <td class="fw-semibold">{h(r['name'])}</td>
-  <td class="text-secondary small">{h(r['detail'])}</td>
-  <td class="text-center fw-semibold">{h(fmt_pct2(r['p']))}</td>
+<tr class="hit-row" data-name="{hs(r['name']).lower()}">
+  <td class="fw-semibold">{hs(r['name'])}</td>
+  <td class="text-secondary small">{hs(r['detail'])}</td>
+  <td class="text-center fw-semibold">{hs(fmt_pct2(r['p']))}</td>
 </tr>
 """
 
@@ -1799,7 +1799,7 @@ def today_hits_board(ab_proj: float = 3.8):
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Projected AB</label>
       <form action="/today-hits" method="get" class="d-flex gap-2">
-        <input class="form-control" name="ab_proj" value="{h(ab_proj)}">
+        <input class="form-control" name="ab_proj" value="{hs(ab_proj)}">
         <button class="btn btn-primary" type="submit">Apply</button>
       </form>
     </div>
@@ -2021,11 +2021,11 @@ def teams_hot_board(window: int = 14):
         trs += f"""
 <tr>
   <td class="text-secondary">{i}</td>
-  <td class="fw-semibold">{h(r['team'])}</td>
+  <td class="fw-semibold">{hs(r['team'])}</td>
   <td class="text-center">{int(r['games'])}</td>
   <td class="text-center">{float(r['hr_g']):.2f}</td>
   <td class="text-center">{float(r['r_g']):.2f}</td>
-  <td class="text-center">{h(ops_str)}</td>
+  <td class="text-center">{hs(ops_str)}</td>
 </tr>
 """
 
