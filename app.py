@@ -2068,12 +2068,6 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 
     team_ids = get_today_team_ids(day)
 
-    # cache this whole page for a short time to avoid hammering MLB API
-    cache_key = f"suggest_hitters_{day}_{per_team}_{min_pa}"
-    cached = mem_cache_get(cache_key)
-    if cached and isinstance(cached.get("cards_html"), str):
-        return layout("Auto-Suggest Hitters", cached["cards_html"])
-
     season = int(day.split("-")[0])
     cards_html = ""
 
@@ -2198,7 +2192,6 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 """
 
     # cache for 10 minutes
-    mem_cache_set(cache_key, {"cards_html": body}, ttl_seconds=600)
     return layout("Auto-Suggest Hitters", body)
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
