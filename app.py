@@ -2,7 +2,6 @@
 
 import json
 import time
-import html
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,7 +13,11 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
+
 from html import escape as h
+
+def hs(x) -> str:
+    return h("" if x is None else str(x))
 
 import mlb_engine as eng  # your engine module
 
@@ -2086,101 +2089,104 @@ document.addEventListener("DOMContentLoaded", function() {{
 </script>
 """
     return layout("Today Hit Board", body)
-    
 @app.get("/suggest/hitters", response_class=HTMLResponse)
 def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
     day = _safe_date_yyyy_mm_dd(date)
+
+    # If no games on requested day, jump to next date with games
     games = get_today_games(day)
     if not games:
         nd = next_game_date(day, 30)
         if nd:
             day = nd
             games = get_today_games(day)
+
     banner = ""
     if date and date.strip() and day != date.strip():
-        banner = f"<div class='card-dark mb-3 p-3 dark-muted'>No games on {hs(date.strip())}. Showing next MLB date: <strong>{hs(day)}</strong>.</div>"
-        
-    try: per_team = int(per_team)
-    except Exception: per_team = 3
+        banner = (
+            "<div class='card-dark mb-3 p-3 dark-muted'>"
+            f"No games on {hs(date.strip())}. Showing next MLB date: <strong>{hs(day)}</strong>."
+            "</div>"
+        )
+
+    try:
+        per_team = int(per_team)
+    except Exception:
+        per_team = 3
     per_team = max(1, min(8, per_team))
 
-    try: min_pa = int(min_pa)
-    except Exception: min_pa = 50
+    try:
+        min_pa = int(min_pa)
+    except Exception:
+        min_pa = 50
     min_pa = max(1, min(300, min_pa))
 
     team_ids = get_today_team_ids(day)
-
     season = int(day.split("-")[0])
+
     cards_html = ""
 
-    # build suggestions
     for tid in team_ids:
-    try:
-        roster = get_active_roster(tid)
-    except Exception:
-        roster = []
-
-    # -----------------------------
-    # STEP 1: Collect hitter IDs
-    # -----------------------------
-    hitter_ids = []
-    meta = {}  # pid -> {name,pos}
-
-    for r in roster:
-        person = (r.get("person") or {})
-        pid = person.get("id")
-        name = person.get("fullName") or ""
-        pos = ((r.get("position") or {}).get("abbreviation") or "")
-
-        if not pid or not name or pos == "P":
-            continue
-
-        pid = int(pid)
-        hitter_ids.append(pid)
-        meta[pid] = {"name": name, "pos": pos}
-
-    if not hitter_ids:
-        continue
-
-    # -----------------------------
-    # STEP 2: Batch fetch stats ONCE
-    # -----------------------------
-    stats_map = batch_people_season_hitting_stats(hitter_ids, season)
-
-    # -----------------------------
-    # STEP 3: Score players
-    # -----------------------------
-    cand = []
-
-    for pid in hitter_ids:
-        st = stats_map.get(pid) or {}
-
+        # roster
         try:
-            pa = int(st.get("plateAppearances") or 0)
-            ops = float(st.get("ops")) if st.get("ops") is not None else None
+            roster = get_active_roster(tid)
         except Exception:
+            roster = []
+
+        # STEP 1: Collect hitter IDs (skip pitchers)
+        hitter_ids = []
+        meta = {}  # pid -> {name,pos}
+
+        for r in roster:
+            person = (r.get("person") or {})
+            pid = person.get("id")
+            name = person.get("fullName") or ""
+            pos = ((r.get("position") or {}).get("abbreviation") or "")
+
+            if not pid or not name or pos == "P":
+                continue
+
+            pid = int(pid)
+            hitter_ids.append(pid)
+            meta[pid] = {"name": name, "pos": pos}
+
+        if not hitter_ids:
             continue
 
-        if pa < min_pa or ops is None:
-            continue
+        # STEP 2: Batch fetch stats once
+        stats_map = batch_people_season_hitting_stats(hitter_ids, season)
 
-        cand.append({
-            "pid": pid,
-            "name": meta[pid]["name"],
-            "pos": meta[pid]["pos"],
-            "ops": st.get("ops"),
-            "pa": st.get("plateAppearances"),
-            "avg": st.get("avg"),
-            "score": float(ops),
-        })
+        # STEP 3: Score players
+        cand = []
+        for pid in hitter_ids:
+            st = stats_map.get(pid) or {}
 
-    cand.sort(key=lambda x: x["score"], reverse=True)
-    top = cand[:per_team]
-    
+            try:
+                pa = int(st.get("plateAppearances") or 0)
+                ops_val = st.get("ops")
+                ops = float(ops_val) if ops_val is not None else None
+            except Exception:
+                continue
+
+            if pa < min_pa or ops is None:
+                continue
+
+            cand.append({
+                "pid": pid,
+                "name": meta[pid]["name"],
+                "pos": meta[pid]["pos"],
+                "ops": st.get("ops"),
+                "pa": st.get("plateAppearances"),
+                "avg": st.get("avg"),
+                "score": float(ops),
+            })
+
+        cand.sort(key=lambda x: x["score"], reverse=True)
+        top = cand[:per_team]
         if not top:
             continue
 
-        # team name (optional)
+        # Team name
         team_name = f"Team {tid}"
         try:
             tdata = mlb_get("/api/v1/teams", params={"teamId": tid})
@@ -2190,14 +2196,14 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
         except Exception:
             pass
 
-        # render card
+        # Render card
         items = ""
         for p in top:
             items += f"""
 <div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
   <div>
     <div class="fw-semibold">{hs(p["name"])} <span class="dark-muted small">{hs(p["pos"])}</span></div>
-    <div class="dark-muted small">OPS {hs(p["ops"])} | PA {h(p["pa"])} | AVG {hs(p["avg"])}</div>
+    <div class="dark-muted small">OPS {hs(p["ops"])} | PA {hs(p["pa"])} | AVG {hs(p["avg"])}</div>
   </div>
   <form action="/watchlist/add" method="post" class="m-0">
     <input type="hidden" name="pid" value="{hs(p["pid"])}">
@@ -2212,7 +2218,7 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 <div class="card-dark mb-3">
   <div class="d-flex justify-content-between align-items-center">
     <div class="h5 fw-semibold mb-0">{hs(team_name)}</div>
-    <div class="dark-muted small">Top {per_team} by season OPS (min PA {min_pa})</div>
+    <div class="dark-muted small">Top {hs(per_team)} by season OPS (min PA {hs(min_pa)})</div>
   </div>
   <hr class="border-light opacity-25">
   {items}
@@ -2220,8 +2226,8 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 """
 
     body = f"""
-    {banner}
-    
+{banner}
+
 <div class="card-dark mb-3">
   <form class="row g-2 align-items-end" action="/suggest/hitters" method="get">
     <div class="col-12 col-md-3">
@@ -2247,8 +2253,6 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 
 {cards_html if cards_html else "<div class='card-dark dark-muted p-3'>No suggestions found (try lowering Min PA or pick another date).</div>"}
 """
-
-    # cache for 10 minutes
     return layout("Auto-Suggest Hitters", body)
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
