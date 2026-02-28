@@ -489,6 +489,89 @@ def batch_people_season_hitting_stats(person_ids: List[int], season: int) -> Dic
                 out[int(pid)] = stat
     return out
 
+def park_leaderboard(window_days: int = 30) -> list[dict]:
+    if window_days not in (7, 14, 30):
+        window_days = 30
+
+    # mem cache
+    k = f"board:parks:{window_days}:{today_yyyy_mm_dd()}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    today = datetime.now(LA_TZ).date()
+    start = today - timedelta(days=window_days)
+    end = today
+
+    cache_path = PARK_CACHE_DIR / f"parks_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.json"
+    disk = cache_read(cache_path)
+    if disk and isinstance(disk.get("rows"), list):
+        mem_set(k, disk["rows"], ttl=60 * 60)  # 1 hour
+        return disk["rows"]
+
+    sched = schedule_range(
+        start.strftime("%Y-%m-%d"),
+        end.strftime("%Y-%m-%d"),
+        hydrate="venue",
+    )
+
+    venue_map: dict[str, dict] = {}
+
+    for d in (sched.get("dates") or []):
+        for g in (d.get("games") or []):
+            status = ((g.get("status") or {}).get("detailedState") or "")
+            if status != "Final":
+                continue
+
+            game_pk = g.get("gamePk")
+            if not game_pk:
+                continue
+
+            venue = (g.get("venue") or {})
+            venue_name = venue.get("name") or "Unknown Park"
+            venue_id = venue.get("id") or ""
+
+            box = get_boxscore_cached(int(game_pk))
+            if not box:
+                continue
+
+            teams = (box.get("teams") or {})
+            away_bat = (teams.get("away") or {}).get("teamStats", {}).get("batting", {}) or {}
+            home_bat = (teams.get("home") or {}).get("teamStats", {}).get("batting", {}) or {}
+
+            hr_away = away_bat.get("homeRuns")
+            hr_home = home_bat.get("homeRuns")
+            if hr_away is None or hr_home is None:
+                continue
+
+            total_hr = int(hr_away) + int(hr_home)
+
+            kk = f"{venue_id}|{venue_name}"
+            rec = venue_map.get(kk)
+            if not rec:
+                rec = {"venue": venue_name, "venue_id": venue_id, "games": 0, "hr_total": 0}
+                venue_map[kk] = rec
+
+            rec["games"] += 1
+            rec["hr_total"] += total_hr
+
+    rows = []
+    for rec in venue_map.values():
+        games = rec["games"]
+        hr_total = rec["hr_total"]
+        rows.append({
+            "venue": rec["venue"],
+            "games": games,
+            "hr_total": hr_total,
+            "hr_per_game": (hr_total / games) if games else 0.0,
+        })
+
+    rows.sort(key=lambda r: (-r["hr_per_game"], -r["games"], r["venue"]))
+
+    cache_write(cache_path, {"rows": rows})
+    mem_set(k, rows, ttl=60 * 60)
+    return rows
+    
 # ----------------------------
 # App + UI layout
 # ----------------------------
