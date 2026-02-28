@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
+from html import escape as h
 
 import mlb_engine as eng  # your engine module
 
