@@ -595,3 +595,1479 @@ def layout(title: str, body: str) -> str:
 </body>
 </html>
 """
+
+# ----------------------------
+# Routes
+# ----------------------------
+@app.get("/", response_class=HTMLResponse)
+def home():
+    try:
+        edge_preview = today_edge_board_data(limit=5)  # optional; if you don't have it, it will fall back
+    except Exception:
+        edge_preview = []
+
+    try:
+        hot_teams_preview = hot_teams(window_days=7)[:5]
+    except Exception:
+        hot_teams_preview = []
+
+    edge_html = (
+        "".join(
+            f"<div>{h(r.get('name',''))} <span class='dark-muted small'>{h(r.get('edge',''))}</span></div>"
+            for r in edge_preview
+        )
+        if edge_preview
+        else "<div class='dark-muted'>No data yet.</div>"
+    )
+
+    teams_html = (
+        "".join(
+            f"<div>{h(r.get('team',''))} — HR/G {float(r.get('hr_g',0) or 0):.2f}</div>"
+            for r in hot_teams_preview
+        )
+        if hot_teams_preview
+        else "<div class='dark-muted'>No data yet.</div>"
+    )
+
+    body = f"""
+<div class="card-dark mb-4 p-4">
+  <div class="display-6 fw-bold">MLB Betting Analytics</div>
+  <div class="dark-muted mt-2">
+    Identify HR edges, hot offenses, favorable parks, and sharp betting spots.
+  </div>
+
+  <div class="mt-4 d-flex gap-3 flex-wrap">
+    <a class="btn btn-primary btn-lg" href="/today-edge">Today Edge Board</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/parks">Park Board</a>
+    <a class="btn btn-primary btn-lg" href="/today">Today Games</a>
+    <a class="btn btn-primary btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
+    <a class="btn btn-primary btn-lg" href="/today-ks">Today Ks</a>
+    <a class="btn btn-primary btn-lg" href="/suggest/hitters">Auto-Suggest Hitters</a>
+    <a class="btn btn-primary btn-lg" href="/today-hits">Today Hits</a>
+    <a class="btn btn-primary btn-lg" href="/today">Today</a>
+  </div>
+</div>
+
+<div class="card-dark mb-4 p-3">
+  <form class="d-flex gap-2" action="/search" method="get">
+    <input class="form-control form-control-lg" name="q"
+           placeholder="Search player (e.g., Aaron Judge)" autocomplete="off">
+    <button class="btn btn-primary btn-lg" type="submit">Search</button>
+  </form>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3">
+      <div class="fw-semibold mb-2">Top HR Edges Today</div>
+      {edge_html}
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3">
+      <div class="fw-semibold mb-2">Hottest Teams (7d)</div>
+      {teams_html}
+    </div>
+  </div>
+</div>
+"""
+    return layout("MLB Analytics Dashboard", body)
+
+@app.get("/search", response_class=HTMLResponse)
+def search(q: str = ""):
+    q = (q or "").strip()
+    matches = eng.search_players(q) if q else []
+
+    items = ""
+    for m in (matches or [])[:25]:
+        pid = m.get("id")
+        full = m.get("fullName") or "Unknown"
+        team = m.get("team") or "-"
+        pos = m.get("primaryPosition") or m.get("pos") or "-"
+
+        items += f"""
+<a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+   href="/player/{int(pid)}">
+  <div>
+    <div class="fw-semibold">{h(full)}</div>
+    <div class="small text-secondary">{h(pos)} - {h(team)}</div>
+  </div>
+  <span class="badge text-bg-secondary mono">ID {h(pid)}</span>
+</a>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <form class="d-flex gap-2" action="/search" method="get">
+    <input class="form-control form-control-lg" name="q" value="{h(q)}" placeholder="Aaron Judge">
+    <button class="btn btn-primary btn-lg" type="submit">Search</button>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="fw-semibold mb-2">Results</div>
+  <div class="list-group">{items if items else '<div class="dark-muted">No results.</div>'}</div>
+</div>
+"""
+    return layout("Search", body)
+
+@app.get("/player/{pid}", response_class=HTMLResponse)
+def player_dashboard(pid: int, season: int = datetime.now().year):
+    name = f"Player {pid}"
+    if hasattr(eng, "api_get"):
+        try:
+            pdata = eng.api_get(f"/people/{pid}")
+            people = pdata.get("people") or []
+            if people:
+                name = people[0].get("fullName") or name
+        except Exception:
+            pass
+
+    already = is_in_watchlist(pid, season, "hitting")
+
+    add_btn = (
+        '<button class="btn btn-success" type="button" disabled>Added</button>'
+        if already
+        else f"""
+<form action="/watchlist/add" method="post">
+  <input type="hidden" name="pid" value="{pid}">
+  <input type="hidden" name="name" value="{h(name)}">
+  <input type="hidden" name="season" value="{season}">
+  <button class="btn btn-primary" type="submit">+ Watchlist</button>
+</form>
+"""
+    )
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="h4 mb-0 fw-semibold">{h(name)}</div>
+      <div class="muted">Player ID <span class="mono">{pid}</span></div>
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+      <form class="d-flex gap-2" action="/player/{pid}" method="get">
+        <input class="form-control" name="season" value="{season}" style="max-width:120px;">
+        <button class="btn btn-outline-secondary" type="submit">Load season</button>
+      </form>
+      {add_btn}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-md-6">
+    <div class="card-dark">
+      <div class="fw-semibold mb-2">Season Stats</div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-primary" href="/player/{pid}/season?group=hitting&season={season}">Hitting</a>
+        <a class="btn btn-outline-primary" href="/player/{pid}/season?group=pitching&season={season}">Pitching</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-6">
+    <div class="card-dark">
+      <div class="fw-semibold mb-2">Trends</div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-warning" href="/player/{pid}/rolling?season={season}">Rolling 7/14/30</a>
+        <a class="btn btn-success" href="/player/{pid}/zscores?season={season}">Z-Scores 7/14/30</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card-dark">
+      <div class="fw-semibold mb-2">Betting Tools</div>
+      <div class="d-grid gap-2">
+        <a class="btn btn-dark" href="/leaderboard/hr-props">HR Props Board (Watchlist)</a>
+        <a class="btn btn-danger" href="/player/{pid}/hr-prop-today?season={season}">Today HR Prop Score</a>
+        <a class="btn btn-outline-light" href="/watchlist">Manage Watchlist</a>
+      </div>
+    </div>
+  </div>
+</div>
+"""
+    return layout("Player Dashboard", body)
+
+@app.get("/player/{pid}/season", response_class=HTMLResponse)
+def player_season(pid: int, group: str = "hitting", season: int = datetime.now().year):
+    group = "pitching" if group == "pitching" else "hitting"
+    st = eng.get_player_stats(pid, "season", group, season=season) or {}
+
+    if group == "hitting":
+        keys = [
+            "gamesPlayed", "plateAppearances", "atBats", "hits", "homeRuns", "rbi",
+            "avg", "obp", "slg", "ops", "strikeOuts", "baseOnBalls"
+        ]
+    else:
+        keys = [
+            "gamesPlayed", "gamesStarted", "wins", "losses", "era", "inningsPitched",
+            "strikeOuts", "whip", "homeRuns", "baseOnBalls", "saves"
+        ]
+
+    rows = ""
+    for k in keys:
+        rows += f"<tr><td class='dark-muted'>{h(k)}</td><td class='fw-semibold'>{h(st.get(k, '-'))}</td></tr>"
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="h5 fw-semibold mb-0">Season {season} - {h(group.title())}</div>
+      <div class="dark-muted">Player <span class="mono">{pid}</span></div>
+    </div>
+    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+  </div>
+</div>
+
+<div class="card-dark">
+  <table class="table mb-0">
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+"""
+    return layout("Season Stats", body)
+
+@app.post("/watchlist/add")
+def watchlist_add(pid: int = Form(...), name: str = Form(...), season: int = Form(...)):
+    add_watch(pid=int(pid), name=str(name).strip() or f"ID {pid}", season=int(season), group="hitting")
+    return RedirectResponse("/watchlist", status_code=303)
+
+@app.get("/watchlist", response_class=HTMLResponse)
+def watchlist():
+    wl = load_watchlist()
+    players = wl.get("players", [])
+
+    rows = ""
+    for i, p in enumerate(players):
+        rows += f"""
+<div class="p-3 soft-card mb-2">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div>
+      <div class="fw-semibold">{h(p.get("name","-"))}</div>
+      <div class="muted small">season {h(p.get("season","-"))} - id {h(p.get("id","-"))}</div>
+    </div>
+    <form action="/watchlist/remove" method="post">
+      <input type="hidden" name="index" value="{i}">
+      <button class="btn btn-outline-danger btn-sm" type="submit">Remove</button>
+    </form>
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <div class="h5 fw-semibold mb-1">Watchlist</div>
+  <div class="muted">Add hitters, then use HR Board to rank them.</div>
+</div>
+{rows if rows else '<div class="p-3 soft-card muted">Watchlist is empty.</div>'}
+"""
+    return layout("Watchlist", body)
+
+@app.post("/watchlist/remove")
+def watchlist_remove(index: int = Form(...)):
+    remove_watch(int(index))
+    return RedirectResponse("/watchlist", status_code=303)
+
+@app.post("/odds/set")
+def odds_set(
+    pid: int = Form(...),
+    date: str = Form(...),
+    odds: int = Form(...),
+    next: str = Form("/today-edge"),
+):
+    date = (date or "").strip() or today_yyyy_mm_dd()
+    set_odds(int(pid), date, int(odds))
+    return RedirectResponse(next, status_code=303)
+
+@app.post("/odds/clear")
+def odds_clear(
+    pid: int = Form(...),
+    date: str = Form(...),
+    next: str = Form("/today-edge"),
+):
+    date = (date or "").strip() or today_yyyy_mm_dd()
+    clear_odds(int(pid), date)
+    return RedirectResponse(next, status_code=303)
+
+@app.get("/today-edge", response_class=HTMLResponse)
+def today_edge_board(pa_proj: float = 4.2):
+    wl = load_watchlist()
+    odds_obj = load_odds()  # IMPORTANT: load once
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
+
+    today = today_yyyy_mm_dd()
+    default_season = datetime.now().year
+
+    rows = []
+    for p in hitters:
+        pid = int(p["id"])
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or default_season)
+
+        p_season, pa_season, hr_season = eng.season_hr_rate_from_season_stats(pid, season)
+        if p_season is None:
+            rows.append({
+                "name": name, "pid": pid, "season": season,
+                "model_p": None, "implied": None, "edge": None,
+                "ctx": "no season baseline", "p_adj": None, "odds": None
+            })
+            continue
+
+        ctx = None
+        p_adj = float(p_season)
+
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+
+        if ctx:
+            park_mult = ctx.get("park_mult")
+            sp_mult = ctx.get("sp_mult")
+            if park_mult is not None:
+                try:
+                    p_adj *= float(park_mult)
+                except Exception:
+                    pass
+            if sp_mult is not None:
+                try:
+                    p_adj *= float(sp_mult)
+                except Exception:
+                    pass
+
+        p_adj = min(max(p_adj, 0.00001), 0.25)
+        model_p = model_hr_game_prob(p_adj, pa_proj=pa_proj)
+
+        amer = get_odds(pid, today, odds_obj=odds_obj)
+        implied = american_to_implied_prob(amer)
+        edge = (model_p - implied) if (implied is not None) else None
+
+        if ctx:
+            sp_name = ctx.get("sp_name", "tbd")
+            venue = ctx.get("venue_name", "tbd")
+            ctx_str = f"{sp_name} / {venue}"
+        else:
+            ctx_str = "no game context (tbd)"
+
+        rows.append({
+            "name": name, "pid": pid, "season": season,
+            "model_p": model_p, "implied": implied, "edge": edge,
+            "ctx": ctx_str, "p_adj": p_adj, "odds": amer
+        })
+
+    # IMPORTANT: None edge always goes to bottom
+    rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or -1e9), -(r["model_p"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        odds_val = "" if r.get("odds") is None else str(r["odds"])
+        edge_str = "n/a" if r["edge"] is None else f"{r['edge']*100:+.1f}%"
+
+        trs += f"""
+<tr class="edge-row" data-name="{lower_attr(r['name'])}">
+  <td class="fw-semibold">{h(r['name'])}</td>
+  <td class="text-secondary small">{h(r['ctx'])}</td>
+  <td class="text-center">{fmt_pct(r['model_p'])}</td>
+  <td class="text-center">{fmt_pct(r['implied'])}</td>
+  <td class="text-center fw-semibold">{h(edge_str)}</td>
+  <td style="min-width:260px;">
+    <div class="d-flex gap-2 flex-wrap">
+      <form action="/odds/set" method="post" class="d-flex gap-2">
+        <input type="hidden" name="pid" value="{r['pid']}">
+        <input type="hidden" name="date" value="{h(today)}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={h(pa_proj)}">
+        <input class="form-control form-control-sm" name="odds" value="{h(odds_val)}" placeholder="+320 / -110" style="max-width:120px;">
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Save</button>
+      </form>
+
+      <form action="/odds/clear" method="post">
+        <input type="hidden" name="pid" value="{r['pid']}">
+        <input type="hidden" name="date" value="{h(today)}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={h(pa_proj)}">
+        <button class="btn btn-outline-danger btn-sm" type="submit">Clear</button>
+      </form>
+    </div>
+  </td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="edgeSearch" class="form-control" placeholder="Type a player name...">
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Projected PA</label>
+      <form action="/today-edge" method="get" class="d-flex gap-2">
+        <input class="form-control" name="pa_proj" value="{h(pa_proj)}">
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+    </div>
+
+    <div class="col-12 col-md-5 dark-muted small">
+      Model% uses adjusted HR/PA and converts it to game HR probability: 1 - (1 - p)^PA.
+      Enter American odds to compute implied% and edge%.
+    </div>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Matchup</th>
+          <th class="text-center">Model</th>
+          <th class="text-center">Implied</th>
+          <th class="text-center">Edge</th>
+          <th>Odds</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="6" class="dark-muted">No hitters in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("edgeSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".edge-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Edge Board", body)
+
+@app.get("/today", response_class=HTMLResponse)
+def today_games(date: str = ""):
+    day = _safe_date_yyyy_mm_dd(date)
+    year = int(day.split("-")[0])
+
+    # cache schedule for today page using mem
+    k = f"page:today:{day}"
+    cached = mem_get(k)
+    if cached is not None:
+        return HTMLResponse(cached)
+
+    data = mlb_get("/api/v1/schedule", params={"sportId": 1, "date": day, "hydrate": "team,venue,probablePitcher"})
+    dates = data.get("dates") or []
+    games = (dates[0].get("games") if dates else []) or []
+
+    cards = ""
+    for g in games:
+        home = ((g.get("teams") or {}).get("home") or {}).get("team") or {}
+        away = ((g.get("teams") or {}).get("away") or {}).get("team") or {}
+        home_name = home.get("name") or "Home"
+        away_name = away.get("name") or "Away"
+
+        venue = (g.get("venue") or {}).get("name") or "Venue tbd"
+        start = fmt_time_pt(g.get("gameDate") or "")
+
+        pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
+        pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
+        pp_home_name = pp_home.get("fullName") or "tbd"
+        pp_away_name = pp_away.get("fullName") or "tbd"
+        pp_home_id = pp_home.get("id")
+        pp_away_id = pp_away.get("id")
+
+        link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
+        link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
+
+        def pitcher_line(name: str, link: str | None) -> str:
+            if link:
+                return f'<a class="link-light" href="{h(link)}">{h(name)}</a>'
+            return f'<span class="dark-muted">{h(name)}</span>'
+
+        cards += f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-1">{h(away_name)} at {h(home_name)}</div>
+      <div class="dark-muted small">{h(day)} - {h(start)} - {h(venue)}</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-light btn-sm" href="/search">Search players</a>
+      <a class="btn btn-outline-light btn-sm" href="/watchlist">Watchlist</a>
+    </div>
+  </div>
+
+  <hr class="border-light opacity-25">
+
+  <div class="row g-2">
+    <div class="col-12 col-md-6">
+      <div class="dark-muted small">Away probable</div>
+      <div class="fw-semibold">{pitcher_line(pp_away_name, link_away)}</div>
+    </div>
+    <div class="col-12 col-md-6">
+      <div class="dark-muted small">Home probable</div>
+      <div class="fw-semibold">{pitcher_line(pp_home_name, link_home)}</div>
+    </div>
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date (YYYY-MM-DD)</label>
+      <input class="form-control" name="date" value="{h(day)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Load</button>
+    </div>
+    <div class="col-12 col-md-7 dark-muted small">
+      Shows schedule + probable pitchers. Times shown in Pacific Time.
+    </div>
+  </form>
+</div>
+
+{cards if cards else '<div class="card-dark dark-muted">No games found for this date.</div>'}
+"""
+    page = layout("Today Games", body)
+    mem_set(k, page, ttl=45)
+    return HTMLResponse(page)
+
+@app.get("/today-hitters", response_class=HTMLResponse)
+def today_hitters(date: str = ""):
+    day = (date or "").strip() or today_yyyy_mm_dd()
+    season = int(day.split("-")[0])
+
+    k = f"page:today_hitters:{day}"
+    cached = mem_get(k)
+    if cached is not None:
+        return HTMLResponse(cached)
+
+    games = get_today_games(day)
+    rows_html = ""
+    total_hitters = 0
+
+    for g in games:
+        game_pk = g.get("gamePk")
+        home = ((g.get("teams") or {}).get("home") or {}).get("team") or {}
+        away = ((g.get("teams") or {}).get("away") or {}).get("team") or {}
+        home_name = home.get("name") or "Home"
+        away_name = away.get("name") or "Away"
+
+        venue = (g.get("venue") or {}).get("name") or "Venue tbd"
+        start_pt = fmt_time_pt(g.get("gameDate") or "")
+
+        pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
+        pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
+        pp_home_name = pp_home.get("fullName") or "tbd"
+        pp_away_name = pp_away.get("fullName") or "tbd"
+
+        hitters_home, hitters_away = [], []
+        lineup_status = "Lineups not posted yet"
+
+        if game_pk:
+            feed = get_feed_live_cached(int(game_pk))
+            if feed:
+                try:
+                    hitters_home = extract_lineup_hitters(feed, "home")
+                    hitters_away = extract_lineup_hitters(feed, "away")
+                    if hitters_home or hitters_away:
+                        lineup_status = "Lineups posted"
+                except Exception:
+                    pass
+
+        def hitters_list_html(hitters: list[dict]) -> str:
+            if not hitters:
+                return f"<div class='dark-muted small'>{h(lineup_status)}</div>"
+            items = ""
+            for hh in hitters:
+                pid = hh["pid"]
+                nm = hh["name"]
+                total = "" if not hh["battingOrder"] else f" (BO {hh['battingOrder']})"
+                items += f"""
+<div class="d-flex justify-content-between align-items-center py-1 border-bottom border-light border-opacity-10">
+  <div>
+    <a class="link-light fw-semibold" href="/player/{pid}?season={season}">{h(nm)}</a>
+    <span class="dark-muted small">{h(hh.get('pos',''))}{h(total)}</span>
+  </div>
+  <form action="/watchlist/add" method="post" class="m-0">
+    <input type="hidden" name="pid" value="{pid}">
+    <input type="hidden" name="name" value="{h(nm)}">
+    <input type="hidden" name="season" value="{season}">
+    <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+  </form>
+</div>
+"""
+            return items
+
+        total_hitters += len(hitters_home) + len(hitters_away)
+
+        rows_html += f"""
+<div class="card-dark mb-3 game-card" data-game="{lower_attr(away_name + ' ' + home_name)}">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-0">{h(away_name)} at {h(home_name)}</div>
+      <div class="dark-muted small">{h(day)} - {h(start_pt)} - {h(venue)}</div>
+      <div class="dark-muted small">Probables: {h(pp_away_name)} (away) - {h(pp_home_name)} (home)</div>
+    </div>
+    <a class="btn btn-outline-light btn-sm" href="/today-edge">Today Edge</a>
+  </div>
+
+  <hr class="border-light opacity-25">
+
+  <div class="row g-3">
+    <div class="col-12 col-md-6">
+      <div class="fw-semibold mb-1">{h(away_name)} hitters</div>
+      {hitters_list_html(hitters_away)}
+    </div>
+    <div class="col-12 col-md-6">
+      <div class="fw-semibold mb-1">{h(home_name)} hitters</div>
+      {hitters_list_html(hitters_home)}
+    </div>
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today-hitters" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date</label>
+      <input class="form-control" name="date" value="{h(day)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Load</button>
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search games</label>
+      <input id="gameSearch" class="form-control" placeholder="Dodgers, Yankees...">
+    </div>
+    <div class="col-12 col-md-3 dark-muted small">
+      Hitters listed when lineups are posted.
+      Added hitters go to Watchlist + Today Edge.
+    </div>
+  </form>
+</div>
+
+<div class="dark-muted small mb-2">Games: {len(games)} | Hitters found: {total_hitters}</div>
+
+{rows_html if rows_html else "<div class='card-dark dark-muted'>No games found.</div>"}
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("gameSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".game-card").forEach(function(card) {{
+      const t = card.getAttribute("data-game") || "";
+      card.style.display = (t.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    page = layout("Today's Hitters", body)
+    mem_set(k, page, ttl=30)
+    return HTMLResponse(page)
+    
+@app.get("/leaderboard/hr-props", response_class=HTMLResponse)
+def hr_props_leaderboard(window: int = 7, min_pa: int = 20):
+    # normalize params
+    try:
+        window = int(window)
+    except Exception:
+        window = 7
+    try:
+        min_pa = int(min_pa)
+    except Exception:
+        min_pa = 20
+
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
+    today = today_yyyy_mm_dd()
+
+    if window not in (7, 14, 30):
+        window = 7
+
+    rows = []
+    for p in hitters:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+
+        # baseline (guard against engine raising)
+        try:
+            p_season, _, _ = eng.season_hr_rate_from_season_stats(pid, season)
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error season baseline: {type(e).__name__}"})
+            continue
+
+        if p_season is None:
+            rows.append({"name": name, "season": season, "z": None, "detail": "no season baseline"})
+            continue
+
+        # game log (guard)
+        try:
+            games = eng.get_player_game_log(pid, season, "hitting") or []
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error game log: {type(e).__name__}"})
+            continue
+
+        if len(games) < window:
+            rows.append({"name": name, "season": season, "z": None, "detail": "not enough games"})
+            continue
+
+        pa_win = safe_int(sum(float(g.get("plateAppearances", 0) or 0) for g in games[:window]))
+        hr_win = safe_int(sum(float(g.get("homeRuns", 0) or 0) for g in games[:window]))
+
+        if pa_win < int(min_pa):
+            rows.append({"name": name, "season": season, "z": None, "detail": f"PA too low ({pa_win} < {min_pa})"})
+            continue
+
+        # optional context (guard)
+        ctx_str = ""
+        p_adj = float(p_season)
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+            if ctx:
+                park_mult = ctx.get("park_mult")
+                sp_mult = ctx.get("sp_mult")
+                if park_mult is not None:
+                    try:
+                        p_adj *= float(park_mult)
+                    except Exception:
+                        pass
+                if sp_mult is not None:
+                    try:
+                        p_adj *= float(sp_mult)
+                    except Exception:
+                        pass
+                ctx_str = f" | SP {ctx.get('sp_name','?')} HR/9={ctx.get('sp_hr9','n/a')} | Park {ctx.get('venue_name','?')}"
+
+        p_adj = min(max(p_adj, 0.00001), 0.25)
+
+        # z calc (guard)
+        try:
+            z = eng.hr_binomial_z(hr_win, pa_win, p_adj)
+        except Exception as e:
+            rows.append({"name": name, "season": season, "z": None, "detail": f"error z-score: {type(e).__name__}"})
+            continue
+
+        detail = f"HR {hr_win}/PA {pa_win} | season HR/PA {p_season:.4f} | adj {p_adj:.4f}{ctx_str}"
+        rows.append({"name": name, "season": season, "z": z, "detail": detail})
+
+    # None z to bottom
+    rows.sort(key=lambda r: (r["z"] is None, -(r["z"] or -1e9)))
+
+    cards = ""
+    for r in rows:
+        cards += f"""
+<div class="p-3 soft-card mb-2">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div>
+      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
+      <div class="text-secondary small">{h(r["detail"])}</div>
+    </div>
+    {badge_for_z(r["z"])}
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/hr-props" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Min PA</label>
+      <input class="form-control" name="min_pa" value="{h(min_pa)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-6 text-secondary small">
+      Guide: <span class="badge text-bg-success">z &gt;= +1.5</span> hot
+      <span class="badge text-bg-danger">z &lt;= -1.5</span> cold
+    </div>
+  </form>
+</div>
+{cards if cards else '<div class="p-3 soft-card text-secondary">No hitters in watchlist yet.</div>'}
+"""
+    return layout("HR Props Board", body)
+    
+@app.get("/leaderboard/heat", response_class=HTMLResponse)
+def heat_leaderboard(window: int = 7):
+    try:
+        window = int(window)
+    except Exception:
+        window = 7
+
+    wl = load_watchlist()
+    players = wl.get("players", [])
+    if window not in (7, 14, 30):
+        window = 7
+
+    rows = []
+    for p in players:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+        group = p.get("group", "hitting")
+
+        # game log (guard)
+        try:
+            games = eng.get_player_game_log(pid, season, group) or []
+        except Exception as e:
+            rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error game log: {type(e).__name__}"})
+            continue
+
+        if len(games) < window:
+            rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "not enough games"})
+            continue
+
+        # hitter heat (guard)
+        if group == "hitting" and hasattr(eng, "hitter_heat_score_z"):
+            try:
+                info = (eng.hitter_heat_score_z(games, windows=(window,)) or {}).get(window)
+            except Exception as e:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error hitter heat: {type(e).__name__}"})
+                continue
+
+            if info:
+                score = info.get("score")
+                comps = info.get("components") or {}
+                detail = f"OPS {fmt_z(comps.get('OPS_z'))} | HR {fmt_z(comps.get('HR_z'))} | H {fmt_z(comps.get('H_z'))} | K {fmt_z(comps.get('K_z'))}"
+                rows.append({"name": name, "season": season, "group": group, "score": score, "detail": detail})
+            else:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "n/a"})
+            continue
+
+        # pitcher heat (guard)
+        if group == "pitching" and hasattr(eng, "pitcher_heat_score_z"):
+            try:
+                info = (eng.pitcher_heat_score_z(games, windows=(window,)) or {}).get(window)
+            except Exception as e:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": f"error pitcher heat: {type(e).__name__}"})
+                continue
+
+            if info:
+                score = info.get("score")
+                comps = info.get("components") or {}
+                detail = f"K/IP {fmt_z(comps.get('KIP_z'))} | ERA {fmt_z(comps.get('ERA_z'))} | BB {fmt_z(comps.get('BB_z'))}"
+                rows.append({"name": name, "season": season, "group": group, "score": score, "detail": detail})
+            else:
+                rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "n/a"})
+            continue
+
+        rows.append({"name": name, "season": season, "group": group, "score": None, "detail": "heat functions missing in engine"})
+
+    rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or -1e9)))
+
+    cards = ""
+    for r in rows:
+        score_badge = (
+            '<span class="badge text-bg-secondary fs-6">n/a</span>'
+            if r["score"] is None
+            else f'<span class="badge text-bg-warning fs-6">{float(r["score"]):+.2f}</span>'
+        )
+        cards += f"""
+<div class="p-3 soft-card mb-2">
+  <div class="d-flex justify-content-between align-items-start gap-2">
+    <div>
+      <div class="fw-semibold">{h(r["name"])} <span class="text-secondary">({h(r["season"])})</span></div>
+      <div class="text-secondary small">{h(r["group"])} - {h(r["detail"])}</div>
+    </div>
+    {score_badge}
+  </div>
+</div>
+"""
+
+    body = f"""
+<div class="p-3 soft-card mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/heat" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-4 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-6 text-secondary small">
+      Heat Score = weighted Z-score blend (higher = hotter).
+    </div>
+  </form>
+</div>
+{cards if cards else '<div class="p-3 soft-card text-secondary">Watchlist is empty.</div>'}
+"""
+    return layout("Heat Board", body)
+    
+@app.get("/leaderboard/parks", response_class=HTMLResponse)
+def parks_board(window: int = 30):
+    if window not in (7, 14, 30):
+        window = 30
+
+    rows = park_leaderboard(window_days=window)
+
+    trs = ""
+    for i, r in enumerate(rows, start=1):
+        trs += f"""
+<tr>
+  <td class="text-secondary">{i}</td>
+  <td class="fw-semibold">{h(r['venue'])}</td>
+  <td class="text-center">{int(r['games'])}</td>
+  <td class="text-center">{int(r['hr_total'])}</td>
+  <td class="text-center fw-semibold">{float(r['hr_per_game']):.2f}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/parks" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7 days</option>
+        <option value="14" {"selected" if window==14 else ""}>14 days</option>
+        <option value="30" {"selected" if window==30 else ""}>30 days</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-8 dark-muted small">
+      Ranks parks by HR per game using completed MLB games in the selected window.
+      Data is cached to keep page loads fast.
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Park</th>
+          <th class="text-center">Games</th>
+          <th class="text-center">HR</th>
+          <th class="text-center">HR/G</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="5" class="dark-muted">No data yet for this window.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Park Leaderboard", body)
+    
+@app.get("/today-ks", response_class=HTMLResponse)
+def today_ks_board(window: int = 14, ip_proj: float = 5.5):
+    wl = load_watchlist()
+    pitchers = [p for p in wl.get("players", []) if p.get("group") == "pitching"]
+
+    try:
+        window = int(window)
+    except Exception:
+        window = 14
+    if window not in (7, 14, 30):
+        window = 14
+
+    try:
+        ip_proj = float(ip_proj)
+    except Exception:
+        ip_proj = 5.5
+    ip_proj = max(1.0, min(9.0, ip_proj))
+
+    rows = []
+    for p in pitchers:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or datetime.now().year)
+
+        # season baseline
+        try:
+            k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
+        except Exception as e:
+            rows.append({"name": name, "k_exp": None, "detail": f"error season baseline: {type(e).__name__}"})
+            continue
+
+        if k_ip_season is None:
+            rows.append({"name": name, "k_exp": None, "detail": "missing season K/IP"})
+            continue
+
+        # recent form (optional blend)
+        try:
+            games = eng.get_player_game_log(pid, season, "pitching") or []
+        except Exception:
+            games = []
+
+        k_ip_recent = None
+        if games:
+            try:
+                k_ip_recent, ip_recent, k_recent = eng.last_n_k_per_ip_from_gamelog(games, window)
+            except Exception:
+                k_ip_recent = None
+
+        k_ip_base = float(k_ip_season)
+        if k_ip_recent is not None:
+            # blend: emphasize recent a bit but keep stable
+            k_ip_base = 0.60 * float(k_ip_recent) + 0.40 * float(k_ip_season)
+
+        # expected Ks
+        k_exp = k_ip_base * ip_proj
+
+        detail = f"season K/IP {k_ip_season:.2f}"
+        if k_ip_recent is not None:
+            detail += f" | last{window} K/IP {k_ip_recent:.2f}"
+        detail += f" | IPproj {ip_proj:.1f}"
+
+        rows.append({"name": name, "k_exp": k_exp, "detail": detail})
+
+    rows.sort(key=lambda r: (r["k_exp"] is None, -(r["k_exp"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        k_str = "n/a" if r["k_exp"] is None else f"{r['k_exp']:.1f}"
+        trs += f"""
+<tr class="ks-row" data-name="{h(r['name']).lower()}">
+  <td class="fw-semibold">{h(r['name'])}</td>
+  <td class="text-secondary small">{h(r['detail'])}</td>
+  <td class="text-center fw-semibold">{k_str}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today-ks" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Projected IP</label>
+      <input class="form-control" name="ip_proj" value="{h(ip_proj)}">
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="ksSearch" class="form-control" placeholder="Type a pitcher name...">
+    </div>
+    <div class="col-12 col-md-4 dark-muted small">
+      Expected Ks = blended K/IP * projected IP. Add pitchers to watchlist (group=pitching).
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Pitcher</th>
+          <th>Notes</th>
+          <th class="text-center">Exp K</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="3" class="dark-muted">No pitchers in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("ksSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".ks-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Pitcher K Board", body)
+    
+@app.get("/today-hits", response_class=HTMLResponse)
+def today_hits_board(ab_proj: float = 3.8):
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
+    today = today_yyyy_mm_dd()
+    default_season = datetime.now().year
+
+    rows = []
+    for p in hitters:
+        pid = int(p["id"])
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or default_season)
+
+        # Get season hitting stats (you already use get_player_stats elsewhere)
+        try:
+            st = eng.get_player_stats(pid, "season", "hitting", season=season) or {}
+        except Exception:
+            st = {}
+
+        # Estimate p_hit_per_ab from season hits/AB
+        ab = _to_int(st.get("atBats"))
+        hits = _to_int(st.get("hits"))
+
+        if not ab or ab <= 0 or hits is None:
+            rows.append({"name": name, "pid": pid, "p": None, "detail": "missing hits/AB"})
+            continue
+
+        p_hit_ab = float(hits) / float(ab)
+        p_game = model_hit_game_prob(p_hit_ab, ab_proj=ab_proj)
+
+        # Optional: show matchup context if your engine provides it
+        ctx_str = ""
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+            if ctx:
+                ctx_str = f"{ctx.get('sp_name','tbd')} / {ctx.get('venue_name','tbd')}"
+            else:
+                ctx_str = "tbd"
+        else:
+            ctx_str = "tbd"
+
+        rows.append({
+            "name": name,
+            "pid": pid,
+            "p": p_game,
+            "detail": f"season H/AB {p_hit_ab:.3f} | ABproj {ab_proj:.1f} | {ctx_str}",
+        })
+
+    # Sort best hit prob first, None at bottom
+    rows.sort(key=lambda r: (r["p"] is None, -(r["p"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        trs += f"""
+<tr class="hit-row" data-name="{h(r['name']).lower()}">
+  <td class="fw-semibold">{h(r['name'])}</td>
+  <td class="text-secondary small">{h(r['detail'])}</td>
+  <td class="text-center fw-semibold">{h(fmt_pct2(r['p']))}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="hitSearch" class="form-control" placeholder="Type a player name...">
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Projected AB</label>
+      <form action="/today-hits" method="get" class="d-flex gap-2">
+        <input class="form-control" name="ab_proj" value="{h(ab_proj)}">
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+    </div>
+
+    <div class="col-12 col-md-5 dark-muted small">
+      Model = 1 - (1 - H/AB)^AB. Uses season H/AB as baseline.
+    </div>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Notes</th>
+          <th class="text-center">Hit%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="3" class="dark-muted">No hitters in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("hitSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".hit-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Hit Board", body)
+@app.get("/suggest/hitters", response_class=HTMLResponse)
+def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
+    day = _safe_date_yyyy_mm_dd(date)
+
+    # If no games on requested day, jump to next date with games
+    games = get_today_games(day)
+    if not games:
+        nd = next_game_date(day, 30)
+        if nd:
+            day = nd
+            games = get_today_games(day)
+
+    banner = ""
+    if date and date.strip() and day != date.strip():
+        banner = (
+            "<div class='card-dark mb-3 p-3 dark-muted'>"
+            f"No games on {hs(date.strip())}. Showing next MLB date: <strong>{hs(day)}</strong>."
+            "</div>"
+        )
+
+    try:
+        per_team = int(per_team)
+    except Exception:
+        per_team = 3
+    per_team = max(1, min(8, per_team))
+
+    try:
+        min_pa = int(min_pa)
+    except Exception:
+        min_pa = 50
+    min_pa = max(1, min(300, min_pa))
+
+    team_ids = get_today_team_ids(day)
+    season = int(day.split("-")[0])
+
+    cards_html = ""
+
+    for tid in team_ids:
+        # roster
+        try:
+            roster = get_active_roster(tid)
+        except Exception:
+            roster = []
+
+        # STEP 1: Collect hitter IDs (skip pitchers)
+        hitter_ids = []
+        meta = {}  # pid -> {name,pos}
+
+        for r in roster:
+            person = (r.get("person") or {})
+            pid = person.get("id")
+            name = person.get("fullName") or ""
+            pos = ((r.get("position") or {}).get("abbreviation") or "")
+
+            if not pid or not name or pos == "P":
+                continue
+
+            pid = int(pid)
+            hitter_ids.append(pid)
+            meta[pid] = {"name": name, "pos": pos}
+
+        if not hitter_ids:
+            continue
+
+        # STEP 2: Batch fetch stats once
+        stats_map = batch_people_season_hitting_stats(hitter_ids, season)
+
+        # STEP 3: Score players
+        cand = []
+        for pid in hitter_ids:
+            st = stats_map.get(pid) or {}
+
+            try:
+                pa = int(st.get("plateAppearances") or 0)
+                ops_val = st.get("ops")
+                ops = float(ops_val) if ops_val is not None else None
+            except Exception:
+                continue
+
+            if pa < min_pa or ops is None:
+                continue
+
+            cand.append({
+                "pid": pid,
+                "name": meta[pid]["name"],
+                "pos": meta[pid]["pos"],
+                "ops": st.get("ops"),
+                "pa": st.get("plateAppearances"),
+                "avg": st.get("avg"),
+                "score": float(ops),
+            })
+
+        cand.sort(key=lambda x: x["score"], reverse=True)
+        top = cand[:per_team]
+        if not top:
+            continue
+
+        # Team name
+        team_name = f"Team {tid}"
+        try:
+            tdata = mlb_get("/api/v1/teams", params={"teamId": tid})
+            teams = tdata.get("teams") or []
+            if teams:
+                team_name = teams[0].get("name") or team_name
+        except Exception:
+            pass
+
+        # Render card
+        items = ""
+        for p in top:
+            items += f"""
+<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
+  <div>
+    <div class="fw-semibold">{hs(p["name"])} <span class="dark-muted small">{hs(p["pos"])}</span></div>
+    <div class="dark-muted small">OPS {hs(p["ops"])} | PA {hs(p["pa"])} | AVG {hs(p["avg"])}</div>
+  </div>
+  <form action="/watchlist/add" method="post" class="m-0">
+    <input type="hidden" name="pid" value="{hs(p["pid"])}">
+    <input type="hidden" name="name" value="{hs(p["name"])}">
+    <input type="hidden" name="season" value="{hs(season)}">
+    <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+  </form>
+</div>
+"""
+
+        cards_html += f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div class="h5 fw-semibold mb-0">{hs(team_name)}</div>
+    <div class="dark-muted small">Top {hs(per_team)} by season OPS (min PA {hs(min_pa)})</div>
+  </div>
+  <hr class="border-light opacity-25">
+  {items}
+</div>
+"""
+
+    body = f"""
+{banner}
+
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/suggest/hitters" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date</label>
+      <input class="form-control" name="date" value="{hs(day)}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Per team</label>
+      <input class="form-control" name="per_team" value="{hs(per_team)}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Min PA</label>
+      <input class="form-control" name="min_pa" value="{hs(min_pa)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Suggest</button>
+    </div>
+    <div class="col-12 col-md-3 dark-muted small">
+      Adds hitters to Watchlist so HR/Heat/Edge boards populate.
+    </div>
+  </form>
+</div>
+
+{cards_html if cards_html else "<div class='card-dark dark-muted p-3'>No suggestions found (try lowering Min PA or pick another date).</div>"}
+"""
+    return layout("Auto-Suggest Hitters", body)
+    
+@app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
+def teams_hot_board(window: int = 14):
+    if window not in (7, 14, 30):
+        window = 14
+
+    rows = hot_teams(window_days=window)
+
+    trs = ""
+    for i, r in enumerate(rows, start=1):
+        ops_str = "n/a" if r["ops"] is None else f"{r['ops']:.3f}"
+        trs += f"""
+<tr>
+  <td class="text-secondary">{i}</td>
+  <td class="fw-semibold">{h(r['team'])}</td>
+  <td class="text-center">{int(r['games'])}</td>
+  <td class="text-center">{float(r['hr_g']):.2f}</td>
+  <td class="text-center">{float(r['r_g']):.2f}</td>
+  <td class="text-center">{h(ops_str)}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/teams-hot" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7 days</option>
+        <option value="14" {"selected" if window==14 else ""}>14 days</option>
+        <option value="30" {"selected" if window==30 else ""}>30 days</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-8 dark-muted small">
+      Teams ranked by HR per game (then OPS, then runs per game) over the selected window.
+      Uses completed games and caches boxscores for speed.
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Team</th>
+          <th class="text-center">Games</th>
+          <th class="text-center">HR/G</th>
+          <th class="text-center">R/G</th>
+          <th class="text-center">OPS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="6" class="dark-muted">No data found.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Hot Teams", body)
