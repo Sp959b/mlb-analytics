@@ -393,7 +393,40 @@ def get_boxscore_cached(game_pk: int) -> dict | None:
         return data
     except Exception:
         return None
+        
+def get_active_roster(team_id: int) -> list[dict]:
+    # active roster = current 26-ish
+    data = mlb_get(f"/api/v1/teams/{int(team_id)}/roster", params={"rosterType": "active"})
+    return data.get("roster") or []
 
+def get_today_team_ids(day: str) -> list[int]:
+    games = get_today_games(day)
+    out = []
+    for g in games:
+        try:
+            out.append(int(g["teams"]["home"]["team"]["id"]))
+            out.append(int(g["teams"]["away"]["team"]["id"]))
+        except Exception:
+            pass
+    return sorted(set(out))
+
+def hitter_score_from_season_stats(st: dict) -> float | None:
+    # rank by OPS primarily (fast + useful)
+    try:
+        ops = st.get("ops")
+        if ops is None:
+            return None
+        return float(ops)
+    except Exception:
+        return None
+
+def hitter_min_pa_ok(st: dict, min_pa: int) -> bool:
+    try:
+        pa = int(st.get("plateAppearances") or 0)
+        return pa >= int(min_pa)
+    except Exception:
+        return False
+        
 # ----------------------------
 # Name cache + lineup extraction
 # ----------------------------
@@ -736,6 +769,7 @@ def layout(title: str, body: str) -> str:
     <a href="/leaderboard/teams-hot">Hot Teams</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
+    <a href="/suggest/hitters">Auto-Suggest Hitters</a>
     <a href="/watchlist">Watchlist</a>
   </div>
 </div>
@@ -754,6 +788,7 @@ def layout(title: str, body: str) -> str:
       <a href="/leaderboard/teams-hot">Hot Teams</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
+      <a href="/suggest/hitters">Auto-Suggest Hitters</a>
       <a href="/watchlist">Watchlist</a>
     </nav>
 
@@ -810,12 +845,16 @@ def home():
   </div>
 
   <div class="mt-4 d-flex gap-3 flex-wrap">
-    <a class="btn btn-danger btn-lg" href="/today-edge">Today Edge Board</a>
+    <a class="btn btn-primary btn-lg" href="/today-edge">Today Edge Board</a>
     <a class="btn btn-primary btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
-    <a class="btn btn-warning btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
-    <a class="btn btn-outline-light btn-lg" href="/leaderboard/parks">Park Board</a>
-    <a class="btn btn-outline-light btn-lg" href="/today">Today Games</a>
-    <a class="btn btn-outline-light btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/parks">Park Board</a>
+    <a class="btn btn-primary btn-lg" href="/today">Today Games</a>
+    <a class="btn btn-primary btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
+    <a class="btn btn-primary btn-lg" href="/today-ks">Today Ks</a>
+    <a class="btn btn-primary btn-lg" href="/suggest/hitters">Auto-Suggest Hitters</a>
+    <a class="btn btn-primary btn-lg" href="/today-hits">Today Hits</a>
+    <a class="btn btn-primary btn-lg" href="/today">Today</a>
   </div>
 </div>
 
@@ -2011,6 +2050,153 @@ document.addEventListener("DOMContentLoaded", function() {{
 </script>
 """
     return layout("Today Hit Board", body)
+    
+@app.get("/suggest/hitters", response_class=HTMLResponse)
+def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
+    day = _safe_date_yyyy_mm_dd(date)
+
+    try: per_team = int(per_team)
+    except Exception: per_team = 3
+    per_team = max(1, min(8, per_team))
+
+    try: min_pa = int(min_pa)
+    except Exception: min_pa = 50
+    min_pa = max(1, min(300, min_pa))
+
+    team_ids = get_today_team_ids(day)
+
+    # cache this whole page for a short time to avoid hammering MLB API
+    cache_key = f"suggest_hitters_{day}_{per_team}_{min_pa}"
+    cached = mem_cache_get(cache_key)
+    if cached and isinstance(cached.get("cards_html"), str):
+        return layout("Auto-Suggest Hitters", cached["cards_html"])
+
+    season = int(day.split("-")[0])
+    cards_html = ""
+
+    # build suggestions
+    for tid in team_ids:
+        roster = []
+        try:
+            roster = get_active_roster(tid)
+        except Exception:
+            roster = []
+
+        # collect candidates
+        cand = []
+        for r in roster:
+            person = (r.get("person") or {})
+            pid = person.get("id")
+            name = person.get("fullName") or ""
+            pos = ((r.get("position") or {}).get("abbreviation") or "")
+
+            if not pid or not name:
+                continue
+
+            # skip pitchers
+            if pos == "P":
+                continue
+
+            # pull season hitting stats
+            try:
+                st = eng.get_player_stats(int(pid), "season", "hitting", season=season) or {}
+            except Exception:
+                st = {}
+
+            if not st or not hitter_min_pa_ok(st, min_pa):
+                continue
+
+            score = hitter_score_from_season_stats(st)
+            if score is None:
+                continue
+
+            cand.append({
+                "pid": int(pid),
+                "name": name,
+                "pos": pos,
+                "team_id": tid,
+                "ops": st.get("ops"),
+                "pa": st.get("plateAppearances"),
+                "avg": st.get("avg"),
+                "score": float(score),
+            })
+
+        # rank and take top N
+        cand.sort(key=lambda x: x["score"], reverse=True)
+        top = cand[:per_team]
+
+        if not top:
+            continue
+
+        # team name (optional)
+        team_name = f"Team {tid}"
+        try:
+            tdata = mlb_get("/api/v1/teams", params={"teamId": tid})
+            teams = tdata.get("teams") or []
+            if teams:
+                team_name = teams[0].get("name") or team_name
+        except Exception:
+            pass
+
+        # render card
+        items = ""
+        for p in top:
+            items += f"""
+<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
+  <div>
+    <div class="fw-semibold">{h(p["name"])} <span class="dark-muted small">{h(p["pos"])}</span></div>
+    <div class="dark-muted small">OPS {h(p["ops"])} | PA {h(p["pa"])} | AVG {h(p["avg"])}</div>
+  </div>
+  <form action="/watchlist/add" method="post" class="m-0">
+    <input type="hidden" name="pid" value="{p["pid"]}">
+    <input type="hidden" name="name" value="{h(p["name"])}">
+    <input type="hidden" name="season" value="{season}">
+    <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+  </form>
+</div>
+"""
+
+        cards_html += f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div class="h5 fw-semibold mb-0">{h(team_name)}</div>
+    <div class="dark-muted small">Top {per_team} by season OPS (min PA {min_pa})</div>
+  </div>
+  <hr class="border-light opacity-25">
+  {items}
+</div>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/suggest/hitters" method="get">
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Date</label>
+      <input class="form-control" name="date" value="{h(day)}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Per team</label>
+      <input class="form-control" name="per_team" value="{h(per_team)}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Min PA</label>
+      <input class="form-control" name="min_pa" value="{h(min_pa)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Suggest</button>
+    </div>
+    <div class="col-12 col-md-3 dark-muted small">
+      Adds hitters to Watchlist so HR/Heat/Edge boards populate.
+    </div>
+  </form>
+</div>
+
+{cards_html if cards_html else "<div class='card-dark dark-muted p-3'>No suggestions found (try lowering Min PA or pick another date).</div>"}
+"""
+
+    # cache for 10 minutes
+    mem_cache_set(cache_key, {"cards_html": body}, ttl_seconds=600)
+    return layout("Auto-Suggest Hitters", body)
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
 def teams_hot_board(window: int = 14):
