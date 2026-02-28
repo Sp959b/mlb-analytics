@@ -210,6 +210,17 @@ def get_odds(pid: int, date: str, odds_obj: dict | None = None) -> int | None:
 # ----------------------------
 # Math helpers
 # ----------------------------
+def model_hit_game_prob(p_hit_per_ab: float, ab_proj: float = 3.8) -> float:
+    # P(Hit >= 1) = 1 - (1 - p)^AB
+    p = max(0.0001, min(0.60, float(p_hit_per_ab)))
+    ab = max(1.0, float(ab_proj))
+    return 1.0 - (1.0 - p) ** ab
+
+def fmt_pct2(p: float | None) -> str:
+    if p is None:
+        return "n/a"
+    return f"{p*100:.0f}%"
+    
 def american_to_implied_prob(odds: int | None) -> float | None:
     if odds is None:
         return None
@@ -718,11 +729,12 @@ def layout(title: str, body: str) -> str:
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
+    <a href="/today-hits">Today Hits</a>
     <a href="/leaderboard/parks">Parks</a>
     <a href="/leaderboard/teams-hot">Hot Teams</a>
-    <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
+    <a href="/watchlist">Watchlist</a>
   </div>
 </div>
 
@@ -734,11 +746,12 @@ def layout(title: str, body: str) -> str:
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
+      <a href="/today-hits">Today Hits</a>
       <a href="/leaderboard/parks">Parks</a>
       <a href="/leaderboard/teams-hot">Hot Teams</a>
-      <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
+      <a href="/watchlist">Watchlist</a>
     </nav>
 
     <main class="col-12 col-lg-10 p-4">
@@ -1743,6 +1756,125 @@ def parks_board(window: int = 30):
 """
     return layout("Park Leaderboard", body)
 
+@app.get("/today-hits", response_class=HTMLResponse)
+def today_hits_board(ab_proj: float = 3.8):
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
+    today = today_yyyy_mm_dd()
+    default_season = datetime.now().year
+
+    rows = []
+    for p in hitters:
+        pid = int(p["id"])
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or default_season)
+
+        # Get season hitting stats (you already use get_player_stats elsewhere)
+        try:
+            st = eng.get_player_stats(pid, "season", "hitting", season=season) or {}
+        except Exception:
+            st = {}
+
+        # Estimate p_hit_per_ab from season hits/AB
+        ab = _to_int(st.get("atBats"))
+        hits = _to_int(st.get("hits"))
+
+        if not ab or ab <= 0 or hits is None:
+            rows.append({"name": name, "pid": pid, "p": None, "detail": "missing hits/AB"})
+            continue
+
+        p_hit_ab = float(hits) / float(ab)
+        p_game = model_hit_game_prob(p_hit_ab, ab_proj=ab_proj)
+
+        # Optional: show matchup context if your engine provides it
+        ctx_str = ""
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+            if ctx:
+                ctx_str = f"{ctx.get('sp_name','tbd')} / {ctx.get('venue_name','tbd')}"
+            else:
+                ctx_str = "tbd"
+        else:
+            ctx_str = "tbd"
+
+        rows.append({
+            "name": name,
+            "pid": pid,
+            "p": p_game,
+            "detail": f"season H/AB {p_hit_ab:.3f} | ABproj {ab_proj:.1f} | {ctx_str}",
+        })
+
+    # Sort best hit prob first, None at bottom
+    rows.sort(key=lambda r: (r["p"] is None, -(r["p"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        trs += f"""
+<tr class="hit-row" data-name="{h(r['name']).lower()}">
+  <td class="fw-semibold">{h(r['name'])}</td>
+  <td class="text-secondary small">{h(r['detail'])}</td>
+  <td class="text-center fw-semibold">{h(fmt_pct2(r['p']))}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="hitSearch" class="form-control" placeholder="Type a player name...">
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Projected AB</label>
+      <form action="/today-hits" method="get" class="d-flex gap-2">
+        <input class="form-control" name="ab_proj" value="{h(ab_proj)}">
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+    </div>
+
+    <div class="col-12 col-md-5 dark-muted small">
+      Model = 1 - (1 - H/AB)^AB. Uses season H/AB as baseline.
+    </div>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Notes</th>
+          <th class="text-center">Hit%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="3" class="dark-muted">No hitters in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("hitSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".hit-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Hit Board", body)
+    
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
 def teams_hot_board(window: int = 14):
     if window not in (7, 14, 30):
