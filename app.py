@@ -1528,23 +1528,46 @@ def heat_leaderboard(window: int = 7):
 {cards if cards else '<div class="p-3 soft-card text-secondary">Watchlist is empty.</div>'}
 """
     return layout("Heat Board", body)
-    
+
 @app.get("/leaderboard/parks", response_class=HTMLResponse)
 def parks_board(window: int = 30):
+    # normalize window defensively (handles querystring weirdness)
+    try:
+        window = int(window)
+    except Exception:
+        window = 30
     if window not in (7, 14, 30):
         window = 30
 
-    rows = park_leaderboard(window_days=window)
+    rows = park_leaderboard(window_days=window) or []
 
     trs = ""
     for i, r in enumerate(rows, start=1):
+        venue = r.get("venue", "Unknown")
+        games = r.get("games", 0)
+        hr_total = r.get("hr_total", 0)
+        hrpg = r.get("hr_per_game", 0.0)
+
+        try:
+            games_i = int(games or 0)
+        except Exception:
+            games_i = 0
+        try:
+            hr_total_i = int(hr_total or 0)
+        except Exception:
+            hr_total_i = 0
+        try:
+            hrpg_f = float(hrpg or 0.0)
+        except Exception:
+            hrpg_f = 0.0
+
         trs += f"""
 <tr>
   <td class="text-secondary">{i}</td>
-  <td class="fw-semibold">{hs(r['venue'])}</td>
-  <td class="text-center">{int(r['games'])}</td>
-  <td class="text-center">{int(r['hr_total'])}</td>
-  <td class="text-center fw-semibold">{float(r['hr_per_game']):.2f}</td>
+  <td class="fw-semibold">{hs(venue)}</td>
+  <td class="text-center">{games_i}</td>
+  <td class="text-center">{hr_total_i}</td>
+  <td class="text-center fw-semibold">{hrpg_f:.2f}</td>
 </tr>
 """
 
