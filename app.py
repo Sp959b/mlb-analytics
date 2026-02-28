@@ -1004,7 +1004,175 @@ def odds_clear(
     date = (date or "").strip() or datetime.now().strftime("%Y-%m-%d")
     clear_odds(int(pid), date)
     return RedirectResponse(next, status_code=303)
+@app.get("/today-edge", response_class=HTMLResponse)
+def today_edge_board(pa_proj: float = 4.2):
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
 
+    today = datetime.now().strftime("%Y-%m-%d")
+    season = datetime.now().year
+
+    rows = []
+    for p in hitters:
+        pid = int(p["id"])
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or season)
+
+        # baseline HR/PA from season stats
+        p_season, pa_season, hr_season = eng.season_hr_rate_from_season_stats(pid, season)
+        if p_season is None:
+            rows.append({
+                "name": name, "pid": pid, "season": season,
+                "model_p": None, "implied": None, "edge": None,
+                "ctx": "no season baseline", "p_adj": None
+            })
+            continue
+
+        # context (park + opposing pitcher multipliers) if available
+        ctx = None
+        p_adj = float(p_season)
+
+        if hasattr(eng, "hr_props_today_context"):
+            try:
+                ctx = eng.hr_props_today_context(pid, season, today)
+            except Exception:
+                ctx = None
+
+        if ctx:
+            park_mult = ctx.get("park_mult")
+            sp_mult = ctx.get("sp_mult")
+            if park_mult is not None:
+                try: p_adj *= float(park_mult)
+                except Exception: pass
+            if sp_mult is not None:
+                try: p_adj *= float(sp_mult)
+                except Exception: pass
+
+        # clamp to sane range
+        p_adj = min(max(p_adj, 0.00001), 0.25)
+
+        model_p = model_hr_game_prob(p_adj, pa_proj=pa_proj)
+
+        # odds + implied + edge
+        amer = get_odds(pid, today)
+        implied = american_to_implied_prob(amer)
+        edge = (model_p - implied) if (implied is not None) else None
+
+        # readable context line
+        if ctx:
+            sp_name = ctx.get("sp_name", "tbd")
+            venue = ctx.get("venue_name", "tbd")
+            ctx_str = f"{sp_name} / {venue}"
+        else:
+            ctx_str = "no game context (tbd)"
+
+        rows.append({
+            "name": name, "pid": pid, "season": season,
+            "model_p": model_p, "implied": implied, "edge": edge,
+            "ctx": ctx_str, "p_adj": p_adj, "odds": amer
+        })
+
+    # Sort: best edge first, then model_p
+    def sort_key(r):
+        e = r["edge"]
+        mp = r["model_p"]
+        return (-(e if e is not None else -999), -(mp if mp is not None else -999))
+
+    rows.sort(key=sort_key)
+
+    # Build table rows
+    trs = ""
+    for r in rows:
+        odds_val = "" if r.get("odds") is None else str(r["odds"])
+        edge_str = "n/a" if r["edge"] is None else f"{r['edge']*100:+.1f}%"
+
+        trs += f"""
+<tr class="edge-row" data-name="{r['name'].lower()}">
+  <td class="fw-semibold">{r['name']}</td>
+  <td class="text-secondary small">{r['ctx']}</td>
+  <td class="text-center">{fmt_pct(r['model_p'])}</td>
+  <td class="text-center">{fmt_pct(r['implied'])}</td>
+  <td class="text-center fw-semibold">{edge_str}</td>
+  <td style="min-width:260px;">
+    <div class="d-flex gap-2 flex-wrap">
+      <form action="/odds/set" method="post" class="d-flex gap-2">
+        <input type="hidden" name="pid" value="{r['pid']}">
+        <input type="hidden" name="date" value="{today}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={pa_proj}">
+        <input class="form-control form-control-sm" name="odds" value="{odds_val}" placeholder="+320 / -110" style="max-width:120px;">
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Save</button>
+      </form>
+
+      <form action="/odds/clear" method="post">
+        <input type="hidden" name="pid" value="{r['pid']}">
+        <input type="hidden" name="date" value="{today}">
+        <input type="hidden" name="next" value="/today-edge?pa_proj={pa_proj}">
+        <button class="btn btn-outline-danger btn-sm" type="submit">Clear</button>
+      </form>
+    </div>
+  </td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="edgeSearch" class="form-control" placeholder="Type a player name...">
+    </div>
+
+    <div class="col-12 col-md-3">
+      <label class="form-label dark-muted small mb-0">Projected PA</label>
+      <form action="/today-edge" method="get" class="d-flex gap-2">
+        <input class="form-control" name="pa_proj" value="{pa_proj}">
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </form>
+    </div>
+
+    <div class="col-12 col-md-5 dark-muted small">
+      Model% uses adjusted HR/PA and converts it to game HR probability: 1 - (1 - p)^PA.
+      Enter American odds to compute implied% and edge%.
+    </div>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Player</th>
+          <th>Matchup</th>
+          <th class="text-center">Model</th>
+          <th class="text-center">Implied</th>
+          <th class="text-center">Edge</th>
+          <th>Odds</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="6" class="dark-muted">No hitters in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("edgeSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = input.value.toLowerCase();
+    document.querySelectorAll(".edge-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Edge Board", body)
+    
 @app.get("/player/{pid}/hr-prop-today", response_class=HTMLResponse)
 def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: int = 14, min_pa: int = 20):
     missing = []
