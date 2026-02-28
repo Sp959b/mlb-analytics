@@ -762,7 +762,6 @@ def home():
         hot_teams_preview = hot_teams(window_days=7)[:5]
     except:
         hot_teams_preview = []
-
     body = f"""
 <div class="card-dark mb-4 p-4">
   <div class="display-6 fw-bold">MLB Betting Analytics</div>
@@ -778,18 +777,61 @@ def home():
   </div>
 </div>
 
+<div class="card-dark mb-4 p-3">
+  <form class="d-flex gap-2" action="/search" method="get">
+    <input class="form-control form-control-lg" name="q" placeholder="Search player (e.g., Aaron Judge)" autocomplete="off">
+    <button class="btn btn-primary btn-lg" type="submit">Search</button>
+  </form>
+</div>
+"""
+   body = f"""
+<div class="card-dark mb-4 p-4">
+  <div class="display-6 fw-bold">MLB Betting Analytics</div>
+  <div class="dark-muted mt-2">
+    Identify HR edges, hot offenses, favorable parks, and sharp betting spots.
+  </div>
+
+  <div class="mt-4 d-flex gap-3 flex-wrap">
+    <a class="btn btn-danger btn-lg" href="/leaderboard/today-edge">Today Edge Board</a>
+    <a class="btn btn-primary btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
+    <a class="btn btn-warning btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
+    <a class="btn btn-outline-light btn-lg" href="/leaderboard/parks">Park Board</a>
+  </div>
+</div>
+
+<div class="card-dark mb-4 p-3">
+  <form class="d-flex gap-2" action="/search" method="get">
+    <input class="form-control form-control-lg" name="q" placeholder="Search player (e.g., Aaron Judge)" autocomplete="off">
+    <button class="btn btn-primary btn-lg" type="submit">Search</button>
+  </form>
+</div>
+
 <div class="row g-3">
 
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3">
-      <div class="fw-semibold mb-2">🔥 Top HR Edges Today</div>
+      <div class="fw-semibold mb-2"> Top HR Edges Today</div>
       {"".join([f"<div>{r.get('name')} <span class='dark-muted small'>{r.get('edge')}</span></div>" for r in edge_preview]) if edge_preview else "<div class='dark-muted'>No data yet.</div>"}
     </div>
   </div>
+ search_card = """
+<div class="card-dark mb-4 p-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-0">Quick Player Search</div>
+      <div class="dark-muted small">Search any MLB player and add them to your watchlist.</div>
+    </div>
+  </div>
 
+  <form class="d-flex gap-2 mt-3" action="/search" method="get">
+    <input class="form-control form-control-lg" name="q" placeholder="Aaron Judge" autocomplete="off">
+    <button class="btn btn-primary btn-lg" type="submit">Search</button>
+  </form>
+</div>
+"""
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3">
-      <div class="fw-semibold mb-2">🏟 Hottest Teams (7d)</div>
+      <div class="fw-semibold mb-2"> Hottest Teams (7d)</div>
       {"".join([f"<div>{r.get('team')} — HR/G {r.get('hr_g'):.2f}</div>" for r in hot_teams_preview]) if hot_teams_preview else "<div class='dark-muted'>No data yet.</div>"}
     </div>
   </div>
