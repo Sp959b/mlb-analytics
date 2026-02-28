@@ -371,11 +371,34 @@ def parse_mlb_utc_to_la(iso_utc: str) -> str:
 MLB_BASE = "https://statsapi.mlb.com"
 LA_TZ = ZoneInfo("America/Los_Angeles")
 
+HTTP = requests.Session()
+
 def mlb_get(path: str, params: dict | None = None) -> dict:
-    r = requests.get(f"{MLB_BASE}{path}", params=params or {}, timeout=20)
+    r = HTTP.get(f"{MLB_BASE}{path}", params=params or {}, timeout=8)
     r.raise_for_status()
     return r.json()
 
+def fetch_people_names(person_ids: list[int]) -> dict[int, str]:
+    ids = [i for i in sorted(set(person_ids)) if i not in NAME_CACHE]
+    if not ids:
+        return {}
+
+    try:
+        pdata = mlb_get(
+            "/api/v1/people",
+            params={"personIds": ",".join(map(str, ids))}
+        )
+        people = pdata.get("people") or []
+        out = {}
+        for p in people:
+            pid = p.get("id")
+            nm = p.get("fullName")
+            if pid and nm:
+                out[int(pid)] = nm
+        return out
+    except Exception:
+        return {}
+        
 def today_yyyy_mm_dd() -> str:
     return datetime.now(LA_TZ).strftime("%Y-%m-%d")
 
@@ -409,32 +432,34 @@ def extract_lineup_hitters(feed: dict, side: str) -> list[dict]:
     batters = t.get("batters") or []
     players = box.get("players") or {}
 
+    missing: list[int] = []
+
+    # First pass: take names from boxscore if present, collect missing ids
+    for pid in batters:
+        pid_int = int(pid)
+        p = players.get(f"ID{pid_int}") or {}
+        person = p.get("person") or {}
+        name = person.get("fullName")
+
+        if name:
+            NAME_CACHE[pid_int] = name
+        else:
+            # maybe already cached from earlier games
+            if pid_int not in NAME_CACHE:
+                missing.append(pid_int)
+
+    # Batch fetch missing names (ONE request)
+    fetched = fetch_people_names(missing)
+    for k, v in fetched.items():
+        NAME_CACHE[k] = v
+
+    # Build output
     for pid in batters:
         pid_int = int(pid)
         p = players.get(f"ID{pid_int}") or {}
 
-        person = p.get("person") or {}
-        name = person.get("fullName")
-
-        # If missing, try cache, then fetch from /people/{id}
-        if not name:
-            name = NAME_CACHE.get(pid_int)
-
-        if not name:
-            try:
-                pdata = mlb_get(f"/api/v1/people/{pid_int}")
-                people = pdata.get("people") or []
-                if people:
-                    name = people[0].get("fullName")
-            except Exception:
-                name = None
-
-        if not name:
-            name = f"ID {pid_int}"
-
-        NAME_CACHE[pid_int] = name
-
-        bo = p.get("battingOrder")  # like "100", "200"...
+        name = NAME_CACHE.get(pid_int) or f"ID {pid_int}"
+        bo = p.get("battingOrder")
         pos = (p.get("position") or {}).get("abbreviation") or ""
 
         out.append({
