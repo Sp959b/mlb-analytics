@@ -28,7 +28,23 @@ app = FastAPI(title="MLB HR Props App")
 # - If you add a Render Persistent Disk, set this to something like /var/data/watchlist.json
 WATCHLIST_PATH = Path("/tmp/watchlist.json")
 
+TEAM_CACHE_DIR = Path("/tmp/team_cache")
+TEAM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+GAME_CACHE_DIR = Path("/tmp/game_cache")
+GAME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+def cache_read(path: Path) -> dict | None:
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+def cache_write(path: Path, obj: dict) -> None:
+    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+    
 def load_watchlist() -> Dict[str, List[Dict[str, Any]]]:
     try:
         if WATCHLIST_PATH.exists():
@@ -151,6 +167,49 @@ def cache_write(path: Path, obj: dict) -> None:
 # ----------------------------
 # UI helpers
 # ----------------------------
+def get_boxscore_cached(game_pk: int) -> dict | None:
+    p = GAME_CACHE_DIR / f"box_{int(game_pk)}.json"
+    cached = cache_read(p)
+    if cached:
+        return cached
+    try:
+        data = mlb_get(f"/api/v1/game/{int(game_pk)}/boxscore")
+        cache_write(p, data)
+        return data
+    except Exception:
+        return None
+
+def extract_team_batting_stats(box: dict, side: str) -> dict | None:
+    """
+    side: 'home' or 'away'
+    Returns: {"team": str, "team_id": int, "hr": int, "r": int, "pa": int|None, "ops": float|None}
+    """
+    try:
+        teams = (box.get("teams") or {})
+        t = teams.get(side) or {}
+        team = (t.get("team") or {})
+        team_name = team.get("name") or side.title()
+        team_id = team.get("id")
+
+        batting = (t.get("teamStats") or {}).get("batting") or {}
+        hr = batting.get("homeRuns")
+        r = batting.get("runs")
+        ops = batting.get("ops")
+        pa = batting.get("plateAppearances")
+
+        # Coerce types safely
+        hr = int(hr) if hr is not None else None
+        r = int(r) if r is not None else None
+        pa = int(pa) if pa is not None else None
+        ops = float(ops) if ops is not None else None
+
+        if hr is None or r is None:
+            return None
+
+        return {"team": team_name, "team_id": team_id, "hr": hr, "r": r, "pa": pa, "ops": ops}
+    except Exception:
+        return None
+        
 def _date_str(dt_obj: datetime) -> str:
     return dt_obj.strftime("%Y-%m-%d")
 
@@ -339,6 +398,7 @@ def layout(title: str, body: str) -> str:
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
     <a href="/leaderboard/parks">Parks</a>
+    <a href="/leaderboard/teams-hot">Hot Teams</a>
     <a href="/watchlist">Watchlist</a>
     <a href="/leaderboard/hr-props">HR Board</a>
     <a href="/leaderboard/heat">Heat Board</a>
@@ -356,6 +416,7 @@ def layout(title: str, body: str) -> str:
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
       <a href="/leaderboard/parks">Parks</a>
+      <a href="/leaderboard/teams-hot">Hot Teams</a>
       <a href="/watchlist">Watchlist</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
@@ -581,7 +642,110 @@ def extract_lineup_hitters(feed: dict, side: str) -> list[dict]:
         })
 
     return out
+def hot_teams(window_days: int = 14) -> list[dict]:
+    if window_days not in (7, 14, 30):
+        window_days = 14
 
+    today = datetime.now(LA_TZ).date()
+    start = today - timedelta(days=window_days)
+    end = today
+
+    cache_path = TEAM_CACHE_DIR / f"hot_teams_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}.json"
+    cached = cache_read(cache_path)
+    if cached and isinstance(cached.get("rows"), list):
+        return cached["rows"]
+
+    sched = mlb_get(
+        "/api/v1/schedule",
+        params={
+            "sportId": 1,
+            "startDate": start.strftime("%Y-%m-%d"),
+            "endDate": end.strftime("%Y-%m-%d"),
+        },
+    )
+
+    agg: dict[int, dict] = {}  # team_id -> totals
+
+    for d in (sched.get("dates") or []):
+        for g in (d.get("games") or []):
+            status = ((g.get("status") or {}).get("detailedState") or "")
+            if status != "Final":
+                continue
+
+            game_pk = g.get("gamePk")
+            if not game_pk:
+                continue
+
+            box = get_boxscore_cached(int(game_pk))
+            if not box:
+                continue
+
+            for side in ("away", "home"):
+                st = extract_team_batting_stats(box, side)
+                if not st:
+                    continue
+
+                tid = int(st.get("team_id") or 0)
+                if tid == 0:
+                    continue
+
+                rec = agg.get(tid)
+                if not rec:
+                    rec = {
+                        "team": st["team"],
+                        "team_id": tid,
+                        "games": 0,
+                        "hr_total": 0,
+                        "r_total": 0,
+                        "pa_total": 0,
+                        "ops_pa_sum": 0.0,  # ops * pa
+                        "ops_games_sum": 0.0,  # fallback: ops per game
+                        "ops_games_n": 0,
+                    }
+                    agg[tid] = rec
+
+                rec["games"] += 1
+                rec["hr_total"] += int(st["hr"])
+                rec["r_total"] += int(st["r"])
+
+                ops = st.get("ops")
+                pa = st.get("pa")
+
+                if ops is not None and pa is not None and pa > 0:
+                    rec["pa_total"] += int(pa)
+                    rec["ops_pa_sum"] += float(ops) * int(pa)
+                elif ops is not None:
+                    rec["ops_games_sum"] += float(ops)
+                    rec["ops_games_n"] += 1
+
+    rows = []
+    for rec in agg.values():
+        g = rec["games"]
+        hr_g = rec["hr_total"] / g if g else 0.0
+        r_g = rec["r_total"] / g if g else 0.0
+
+        ops = None
+        if rec["pa_total"] > 0:
+            ops = rec["ops_pa_sum"] / rec["pa_total"]
+        elif rec["ops_games_n"] > 0:
+            ops = rec["ops_games_sum"] / rec["ops_games_n"]
+
+        rows.append({
+            "team": rec["team"],
+            "games": g,
+            "hr_total": rec["hr_total"],
+            "r_total": rec["r_total"],
+            "hr_g": hr_g,
+            "r_g": r_g,
+            "ops": ops,
+        })
+
+    # Sort by HR/G, then OPS, then R/G
+    rows.sort(key=lambda r: (-(r["hr_g"]), -(r["ops"] if r["ops"] is not None else -999), -(r["r_g"])))
+
+    cache_write(cache_path, {"rows": rows})
+    return rows
+    
 # ----------------------------
 # Routes
 # ----------------------------
@@ -1782,3 +1946,67 @@ def parks_board(window: int = 30):
 </div>
 """
     return layout("Park Leaderboard", body)
+@app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
+def teams_hot_board(window: int = 14):
+    if window not in (7, 14, 30):
+        window = 14
+
+    rows = hot_teams(window_days=window)
+
+    trs = ""
+    for i, r in enumerate(rows, start=1):
+        ops_str = "n/a" if r["ops"] is None else f"{r['ops']:.3f}"
+        trs += f"""
+<tr>
+  <td class="text-secondary">{i}</td>
+  <td class="fw-semibold">{r['team']}</td>
+  <td class="text-center">{r['games']}</td>
+  <td class="text-center">{r['hr_g']:.2f}</td>
+  <td class="text-center">{r['r_g']:.2f}</td>
+  <td class="text-center">{ops_str}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/teams-hot" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7 days</option>
+        <option value="14" {"selected" if window==14 else ""}>14 days</option>
+        <option value="30" {"selected" if window==30 else ""}>30 days</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Refresh</button>
+    </div>
+    <div class="col-12 col-md-8 dark-muted small">
+      Teams ranked by HR per game (then OPS, then runs per game) over the selected window.
+      Uses completed games and caches boxscores for speed.
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Team</th>
+          <th class="text-center">Games</th>
+          <th class="text-center">HR/G</th>
+          <th class="text-center">R/G</th>
+          <th class="text-center">OPS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="6" class="dark-muted">No data found.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Hot Teams", body)
+    
