@@ -80,7 +80,53 @@ def search_players(name: str) -> list[dict]:
         })
     return results
 
+def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
+    """
+    Correct MLB season hits leaders via stats/leaders endpoint.
+    Returns: [{"pid": int, "name": str, "team": str, "hits": int}, ...]
+    """
+    try:
+        season = int(season)
+    except Exception:
+        season = datetime.now().year
 
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 50
+    limit = max(1, min(200, limit))
+
+    data = api_get("/stats/leaders", {
+        "leaderCategories": "hits",
+        "season": season,
+        "sportId": 1,
+        "limit": limit,
+        "leaderGameTypes": "R",  # Regular season
+    })
+
+    ll = data.get("leagueLeaders") or []
+    leaders = (ll[0].get("leaders") if ll else []) or []
+
+    rows = []
+    for r in leaders:
+        person = r.get("person") or {}
+        team = r.get("team") or {}
+        val = r.get("value")
+
+        try:
+            hits = int(val)
+        except Exception:
+            continue  # skip weird rows
+
+        rows.append({
+            "pid": person.get("id"),
+            "name": person.get("fullName") or "Unknown",
+            "team": team.get("name") or "",
+            "hits": hits,
+        })
+
+    return rows
+    
 def choose_player(matches: list[dict]) -> dict | None:
     if not matches:
         print("No players found.")
