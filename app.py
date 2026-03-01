@@ -695,32 +695,35 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     return rows
     
 def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
-    # Regular season leaders for hits
     data = mlb_get(
         "/api/v1/stats/leaders",
         params={
             "leaderCategories": "hits",
             "season": int(season),
             "sportId": 1,
+            "gameType": "R",          # regular season
             "limit": int(limit),
-            "gameType": "R",          # <- IMPORTANT (regular season)
-            "hydrate": "person,team", # names + teams
+            "hydrate": "person,team",
         },
     )
 
-    leaders = (data.get("leagueLeaders") or [])
-    if not leaders:
-        return []
+    ll = (data.get("leagueLeaders") or [])
+    leaders = (ll[0].get("leaders") if ll else []) or []
 
     rows = []
-    for item in (leaders[0].get("leaders") or []):
-        person = (item.get("person") or {})
-        team = (item.get("team") or {})
+    for it in leaders:
+        person = it.get("person") or {}
+        team = it.get("team") or {}
+        try:
+            hits_val = int(it.get("value") or 0)
+        except Exception:
+            hits_val = 0
+
         rows.append({
-            "pid": person.get("id"),
+            "pid": int(person.get("id") or 0),
             "name": person.get("fullName") or "Unknown",
             "team": team.get("name") or "",
-            "hits": item.get("value"),  # should be ~0-220 range
+            "hits": hits_val,
         })
 
     return rows    
@@ -2272,8 +2275,18 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
     
 @app.get("/leaderboard/hits", response_class=HTMLResponse)
 def hits_board(season: int = 2025, limit: int = 50):
+    # if you have page caching anywhere, make sure key includes season+limit:
+    k = f"page:hits:{season}:{limit}"
+    cached = mem_get(k)
+    if cached is not None:
+        return HTMLResponse(cached)
+        
     rows = hits_leaders(season=season, limit=limit) or []
-
+    
+    page = layout("Hits Leaders", body)
+    mem_set(k, page, ttl=60)   # or just delete this line to disable caching
+    return HTMLResponse(page)
+    
     trs = ""
     for i, r in enumerate(rows, start=1):
         trs += f"""
