@@ -693,43 +693,33 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     cache_write(cache_path, {"rows": rows})
     mem_set(k, rows, ttl=60 * 30)
     return rows
-    
 def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
-    # Official MLB season leaderboard for HITS
-    try:
-        season = int(season)
-    except Exception:
-        season = datetime.now().year
-
-    try:
-        limit = int(limit)
-    except Exception:
-        limit = 50
-    limit = max(1, min(200, limit))
-
-    data = mlb_get(
-        "/api/v1/stats/leaders",
+    data = api_get(
+        "/stats",
         params={
-            "leaderCategories": "hits",
+            "stats": "season",
+            "group": "hitting",
             "season": season,
-            "sportId": 1,            # MLB
+            "sortStat": "hits",
+            "order": "desc",
             "limit": limit,
-            "leaderGameTypes": "R",   # Regular season
+            "sportIds": 1,
         },
     )
 
-    out: list[dict] = []
-    ll = (data.get("leagueLeaders") or [])
-    leaders = (ll[0].get("leaders") if ll else []) or []
+    splits = (data.get("stats") or [{}])[0].get("splits") or []
 
-    for r in leaders:
-        person = r.get("person") or {}
-        team = r.get("team") or {}
+    out = []
+    for s in splits:
+        person = s.get("player") or {}
+        team = s.get("team") or {}
+        stat = s.get("stat") or {}
+
         out.append({
             "pid": person.get("id"),
-            "name": person.get("fullName") or "Unknown",
-            "team": team.get("name") or "",
-            "hits": r.get("value"),  # already the hits number
+            "name": person.get("fullName"),
+            "team": team.get("name"),
+            "hits": stat.get("hits"),
         })
 
     return out    
