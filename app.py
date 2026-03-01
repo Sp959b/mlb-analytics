@@ -2309,8 +2309,8 @@ def hits_board(season: int = 2025, limit: int = 50):
 <tr>
   <td class="text-secondary">{i}</td>
   <td class="fw-semibold">
-    <a class="link-light" href="/player/{hs(r['pid'])}?season={hs(season)}">{hs(r['name'])}</a>
-    <span class="dark-muted small ms-2">{hs(r['team'])}</span>
+  <a class="link-primary fw-semibold" href="/player/{hs(r['pid'])}?season={hs(season)}">{hs(r['name'])}</a>
+  <span class="text-secondary small ms-2">{hs(r['team'])}</span>
   </td>
   <td class="text-center fw-semibold">{hs(r['hits'])}</td>
   <td class="text-end" style="min-width:140px;">
