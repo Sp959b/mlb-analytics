@@ -1,0 +1,8 @@
+{
+  "name": "MLB Analytics",
+  "short_name": "MLB Edge",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1115",
+  "theme_color": "#0f1115"
+}
