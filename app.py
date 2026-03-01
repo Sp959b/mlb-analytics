@@ -2275,26 +2275,16 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
     
 @app.get("/leaderboard/hits", response_class=HTMLResponse)
 def hits_board(season: int = 2025, limit: int = 50):
-    # if you have page caching anywhere, make sure key includes season+limit:
-    k = f"page:hits:{season}:{limit}"
-    cached = mem_get(k)
-    if cached is not None:
-        return HTMLResponse(cached)
-        
     rows = hits_leaders(season=season, limit=limit) or []
-    
-    page = layout("Hits Leaders", body)
-    mem_set(k, page, ttl=60)   # or just delete this line to disable caching
-    return HTMLResponse(page)
-    
+
     trs = ""
     for i, r in enumerate(rows, start=1):
         trs += f"""
 <tr>
   <td class="text-secondary">{i}</td>
   <td class="fw-semibold">
-  <a class="link-primary fw-semibold" href="/player/{hs(r['pid'])}?season={hs(season)}">{hs(r['name'])}</a>
-  <span class="text-secondary small ms-2">{hs(r['team'])}</span>
+    <a class="link-primary" href="/player/{hs(r['pid'])}?season={hs(season)}">{hs(r['name'])}</a>
+    <span class="text-secondary small ms-2">{hs(r['team'])}</span>
   </td>
   <td class="text-center fw-semibold">{hs(r['hits'])}</td>
   <td class="text-end" style="min-width:140px;">
@@ -2302,7 +2292,7 @@ def hits_board(season: int = 2025, limit: int = 50):
       <input type="hidden" name="pid" value="{hs(r['pid'])}">
       <input type="hidden" name="name" value="{hs(r['name'])}">
       <input type="hidden" name="season" value="{hs(season)}">
-      <button class="btn btn-danger-light btn-sm" type="submit">+ Watch</button>
+      <button class="btn btn-outline-dark btn-sm" type="submit">+ Watch</button>
     </form>
   </td>
 </tr>
@@ -2320,17 +2310,14 @@ def hits_board(season: int = 2025, limit: int = 50):
       <input class="form-control" name="limit" value="{hs(limit)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
-      <button class="btn btn-primary" type="submit">Load</button>
-    </div>
-    <div class="col-12 col-md-6 dark-muted small">
-      MLB leaders for total season hits. Use +Watch to add hitters to your Watchlist.
+      <button class="btn btn-primary" type="submit">Refresh</button>
     </div>
   </form>
 </div>
 
 <div class="card-dark">
   <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
+    <table class="table table-sm align-middle mb-0 bg-white text-dark">
       <thead>
         <tr>
           <th>#</th>
@@ -2340,13 +2327,13 @@ def hits_board(season: int = 2025, limit: int = 50):
         </tr>
       </thead>
       <tbody>
-        {trs if trs else '<tr><td colspan="4" class="dark-muted">No data returned.</td></tr>'}
+        {trs if trs else '<tr><td colspan="4" class="text-secondary">No data.</td></tr>'}
       </tbody>
     </table>
   </div>
 </div>
 """
-    return layout(f"Top Hits Leaders ({hs(season)})", body)
+    return layout(f"Hits Leaders ({hs(season)})", body)    
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
 def teams_hot_board(window: int = 14):
