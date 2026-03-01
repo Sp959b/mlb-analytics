@@ -2318,7 +2318,7 @@ def hits_board(season: int = 2025, limit: int = 50):
       <input type="hidden" name="pid" value="{hs(r['pid'])}">
       <input type="hidden" name="name" value="{hs(r['name'])}">
       <input type="hidden" name="season" value="{hs(season)}">
-      <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+      <button class="btn btn-danger-light btn-sm" type="submit">+ Watch</button>
     </form>
   </td>
 </tr>
