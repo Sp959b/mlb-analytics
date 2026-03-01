@@ -738,6 +738,9 @@ def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
 # ----------------------------
 app = FastAPI(title="MLB Analytics")
 
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 def layout(title: str, body: str) -> str:
     return f"""<!doctype html>
 <html>
