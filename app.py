@@ -2281,7 +2281,7 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
     
 @app.get("/leaderboard/hits", response_class=HTMLResponse)
 def hits_board(season: int = 2025, limit: int = 50):
-    rows = hits_leaders(season=season, limit=limit) or []
+    rows = eng.hits_leaders(season=season, limit=limit) or []
 
     trs = ""
     for i, r in enumerate(rows, start=1):
