@@ -693,6 +693,148 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     cache_write(cache_path, {"rows": rows})
     mem_set(k, rows, ttl=60 * 30)
     return rows
+def get_venue_detail_cached(venue_id: int) -> Optional[dict]:
+    if not venue_id:
+        return None
+    k = f"venue:{int(venue_id)}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+    try:
+        data = mlb_get("/api/v1/venues", params={"venueIds": int(venue_id)})
+        venues = data.get("venues") or []
+        v = venues[0] if venues else None
+        if v:
+            mem_set(k, v, ttl=60 * 60 * 24)  # 24h
+        return v
+    except Exception:
+        return None
+
+def venue_lat_lon(v: dict) -> tuple[Optional[float], Optional[float]]:
+    if not v:
+        return (None, None)
+    loc = v.get("location") or {}
+    coords = loc.get("defaultCoordinates") or {}
+    lat = coords.get("latitude") or loc.get("latitude")
+    lon = coords.get("longitude") or loc.get("longitude")
+    try:
+        return (float(lat), float(lon))
+    except Exception:
+        return (None, None)
+
+
+def open_meteo_hourly(lat: float, lon: float) -> Optional[dict]:
+    k = f"wx:{lat:.3f},{lon:.3f}:{today_yyyy_mm_dd()}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+    try:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "hourly": "temperature_2m,precipitation_probability,wind_speed_10m,wind_direction_10m",
+            "timezone": "America/Los_Angeles",
+            "forecast_days": 2,
+            "temperature_unit": "fahrenheit",
+            "wind_speed_unit": "mph",
+        }
+        r = HTTP.get(url, params=params, timeout=12)
+        r.raise_for_status()
+        data = r.json()
+        mem_set(k, data, ttl=60 * 15)  # 15 min
+        return data
+    except Exception:
+        return None
+
+
+def pick_hourly_weather(wx: dict, game_iso_utc: str) -> Optional[dict]:
+    if not wx or not game_iso_utc:
+        return None
+    hourly = wx.get("hourly") or {}
+    times = hourly.get("time") or []
+    if not times:
+        return None
+
+    try:
+        dt_utc = datetime.fromisoformat(game_iso_utc.replace("Z", "+00:00"))
+        dt_pt = dt_utc.astimezone(LA_TZ)
+        target = dt_pt.replace(minute=0, second=0, microsecond=0)
+        target_s = target.strftime("%Y-%m-%dT%H:%M")
+    except Exception:
+        return None
+
+    idx = times.index(target_s) if target_s in times else None
+    if idx is None:
+        return None
+
+    def at(key):
+        arr = hourly.get(key) or []
+        return arr[idx] if idx < len(arr) else None
+
+    return {
+        "time_pt": target_s,
+        "temp_f": at("temperature_2m"),
+        "wind_mph": at("wind_speed_10m"),
+        "wind_dir": at("wind_direction_10m"),
+        "precip_pct": at("precipitation_probability"),
+    }
+    
+
+def pick_hourly_weather(wx: dict, iso_utc: str) -> Optional[dict]:
+    """
+    Pick the closest hourly forecast to the game time.
+    """
+    if not wx or not iso_utc:
+        return None
+    hourly = wx.get("hourly") or {}
+    times = hourly.get("time") or []
+    if not times:
+        return None
+
+    try:
+        # Convert game time to PT hour string like '2026-03-01T16:00'
+        dt_utc = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
+        dt_pt = dt_utc.astimezone(LA_TZ)
+        target = dt_pt.replace(minute=0, second=0, microsecond=0)
+        target_s = target.strftime("%Y-%m-%dT%H:%M")
+    except Exception:
+        return None
+
+    # find exact match or nearest
+    idx = None
+    if target_s in times:
+        idx = times.index(target_s)
+    else:
+        # nearest by absolute time difference
+        best = None
+        for i, t in enumerate(times[:96]):  # cap search
+            try:
+                dt = datetime.fromisoformat(t)
+                diff = abs((dt - datetime.fromisoformat(target_s)).total_seconds())
+                if best is None or diff < best[0]:
+                    best = (diff, i)
+            except Exception:
+                continue
+        idx = best[1] if best else None
+
+    if idx is None:
+        return None
+
+    def get_arr(key):
+        arr = hourly.get(key) or []
+        return arr[idx] if idx < len(arr) else None
+
+    return {
+        "time_pt": times[idx],
+        "temp_f": get_arr("temperature_2m"),  # this is Celsius unless you request units
+        "wind_mph": get_arr("wind_speed_10m"),
+        "wind_dir": get_arr("wind_direction_10m"),
+        "precip_pct": get_arr("precipitation_probability"),
+        "temperature_unit": "fahrenheit",
+        "wind_speed_unit": "mph",
+    }
+    
 def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
     # Official MLB season leaderboard for HITS
     try:
@@ -1338,6 +1480,27 @@ def today_games(date: str = ""):
 
         venue = (g.get("venue") or {}).get("name") or "Venue tbd"
         start = fmt_time_pt(g.get("gameDate") or "")
+        venue_obj = (g.get("venue") or {})
+        venue = venue_obj.get("name") or "Venue tbd"
+        venue_id = venue_obj.get("id")
+        game_iso_utc = g.get("gameDate") or ""
+        start = fmt_time_pt(game_iso_utc)
+
+        wx_line = ""
+        if venue_id:
+            vd = get_venue_detail_cached(int(venue_id))
+            lat, lon = venue_lat_lon(vd or {})
+            if lat is not None and lon is not None:
+                wx = open_meteo_hourly(lat, lon)
+                w = pick_hourly_weather(wx, game_iso_utc) if wx else None
+                if w:
+                    wx_line = (
+                        f"<div class='dark-muted small'>"
+                        f"Weather: {hs(w.get('temp_f'))}°F | "
+                        f"Wind {hs(w.get('wind_mph'))} mph | "
+                        f"Rain {hs(w.get('precip_pct'))}%"
+                        f"</div>"
+                    )
 
         pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
         pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
@@ -1360,6 +1523,7 @@ def today_games(date: str = ""):
     <div>
       <div class="h5 fw-semibold mb-1">{hs(away_name)} at {hs(home_name)}</div>
       <div class="dark-muted small">{hs(day)} - {hs(start)} - {hs(venue)}</div>
+      {wx_line}
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-outline-light btn-sm" href="/search">Search players</a>
