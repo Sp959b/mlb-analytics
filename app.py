@@ -796,7 +796,7 @@ def layout(title: str, body: str) -> str:
   </div>
   <div class="offcanvas-body">
     <a href="/">Dashboard</a>
-    <a href="/leaderboard/hits?season=2025">Top Hits (2025)</a>
+    <a href="/leaderboard/hits?season=2025">Top Hitters (1876-Current)</a>
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
@@ -816,7 +816,7 @@ def layout(title: str, body: str) -> str:
     <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
       <h4 class="fw-bold mb-4">MLB Analytics</h4>
       <a href="/">Dashboard</a>
-      <a href="/leaderboard/hits?season=2025">Top Hits (2025)</a>
+      <a href="/leaderboard/hits?season=2025">Top Hits (1876-Current)</a>
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
