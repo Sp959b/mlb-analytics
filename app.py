@@ -695,38 +695,44 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     return rows
     
 def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
+    # Official MLB season leaderboard for HITS
+    try:
+        season = int(season)
+    except Exception:
+        season = datetime.now().year
+
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 50
+    limit = max(1, min(200, limit))
+
     data = mlb_get(
         "/api/v1/stats/leaders",
         params={
             "leaderCategories": "hits",
-            "season": int(season),
-            "sportId": 1,
-            "gameType": "R",          # regular season
-            "limit": int(limit),
-            "hydrate": "person,team",
+            "season": season,
+            "sportId": 1,            # MLB
+            "limit": limit,
+            "leaderGameTypes": "R",   # Regular season
         },
     )
 
+    out: list[dict] = []
     ll = (data.get("leagueLeaders") or [])
     leaders = (ll[0].get("leaders") if ll else []) or []
 
-    rows = []
-    for it in leaders:
-        person = it.get("person") or {}
-        team = it.get("team") or {}
-        try:
-            hits_val = int(it.get("value") or 0)
-        except Exception:
-            hits_val = 0
-
-        rows.append({
-            "pid": int(person.get("id") or 0),
+    for r in leaders:
+        person = r.get("person") or {}
+        team = r.get("team") or {}
+        out.append({
+            "pid": person.get("id"),
             "name": person.get("fullName") or "Unknown",
             "team": team.get("name") or "",
-            "hits": hits_val,
+            "hits": r.get("value"),  # already the hits number
         })
 
-    return rows    
+    return out    
     
 # ----------------------------
 # App + UI layout
