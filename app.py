@@ -694,6 +694,66 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     mem_set(k, rows, ttl=60 * 30)
     return rows
     
+def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
+    """
+    Uses MLB stats leaders endpoint (fast).
+    Returns rows: {pid, name, team, value}
+    """
+    try:
+        season = int(season)
+    except Exception:
+        season = 2025
+
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 50
+    limit = max(5, min(200, limit))
+
+    k = f"leaders:hits:{season}:{limit}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    data = mlb_get(
+        "/api/v1/stats/leaders",
+        params={
+            "leaderCategories": "hits",
+            "season": season,
+            "sportId": 1,
+            "limit": limit,
+        },
+    )
+
+    leaders = (data.get("leagueLeaders") or [])
+    # MLB usually returns: [{"leaderCategory":"hits","leaders":[...]}]
+    leaders_list = (leaders[0].get("leaders") if leaders else []) or []
+
+    rows: list[dict] = []
+    for it in leaders_list:
+        person = (it.get("person") or {})
+        pid = person.get("id")
+        name = person.get("fullName") or ""
+        val = it.get("value")
+        team_name = ""
+        try:
+            team_name = (it.get("team") or {}).get("name") or ""
+        except Exception:
+            team_name = ""
+
+        if not pid or not name:
+            continue
+
+        rows.append({
+            "pid": int(pid),
+            "name": name,
+            "team": team_name or "-",
+            "hits": int(val) if str(val).isdigit() else val,
+        })
+
+    mem_set(k, rows, ttl=60 * 60 * 6)  # 6 hours
+    return rows
+    
 # ----------------------------
 # App + UI layout
 # ----------------------------
@@ -757,6 +817,7 @@ def layout(title: str, body: str) -> str:
   </div>
   <div class="offcanvas-body">
     <a href="/">Dashboard</a>
+    <a href="/leaderboard/hits?season=2025">Top Hits (2025)</a>
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
@@ -776,6 +837,7 @@ def layout(title: str, body: str) -> str:
     <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
       <h4 class="fw-bold mb-4">MLB Analytics</h4>
       <a href="/">Dashboard</a>
+      <a href="/leaderboard/hits?season=2025">Top Hits (2025)</a>
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
@@ -842,15 +904,16 @@ def home():
   </div>
 
   <div class="mt-4 d-flex gap-3 flex-wrap">
+    <a class="btn btn-danger btn-lg" href="/leaderboard/hits?season=2025">Top Hits (2025)</a>  
     <a class="btn btn-primary btn-lg" href="/today-edge">Today Edge Board</a>
-    <a class="btn btn-primary btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
-    <a class="btn btn-primary btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
+    <a class="btn btn-warning btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
+    <a class="btn btn-danger btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
     <a class="btn btn-primary btn-lg" href="/leaderboard/parks">Park Board</a>
-    <a class="btn btn-primary btn-lg" href="/today">Today Games</a>
+    <a class="btn btn-warning btn-lg" href="/today">Today Games</a>
     <a class="btn btn-primary btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
-    <a class="btn btn-primary btn-lg" href="/today-ks">Today Ks</a>
+    <a class="btn btn-danger btn-lg" href="/today-ks">Today Ks</a>
     <a class="btn btn-primary btn-lg" href="/suggest/hitters">Auto-Suggest Hitters</a>
-    <a class="btn btn-primary btn-lg" href="/today-hits">Today Hits</a>
+    <a class="btn btn-warning btn-lg" href="/today-hits">Today Hits</a>
     <a class="btn btn-primary btn-lg" href="/today">Today</a>
   </div>
 </div>
@@ -2235,6 +2298,71 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
 {cards_html if cards_html else "<div class='card-dark dark-muted p-3'>No suggestions found (try lowering Min PA or pick another date).</div>"}
 """
     return layout("Auto-Suggest Hitters", body)
+    
+@app.get("/leaderboard/hits", response_class=HTMLResponse)
+def hits_board(season: int = 2025, limit: int = 50):
+    rows = hits_leaders(season=season, limit=limit) or []
+
+    trs = ""
+    for i, r in enumerate(rows, start=1):
+        trs += f"""
+<tr>
+  <td class="text-secondary">{i}</td>
+  <td class="fw-semibold">
+    <a class="link-light" href="/player/{hs(r['pid'])}?season={hs(season)}">{hs(r['name'])}</a>
+    <span class="dark-muted small ms-2">{hs(r['team'])}</span>
+  </td>
+  <td class="text-center fw-semibold">{hs(r['hits'])}</td>
+  <td class="text-end" style="min-width:140px;">
+    <form action="/watchlist/add" method="post" class="m-0">
+      <input type="hidden" name="pid" value="{hs(r['pid'])}">
+      <input type="hidden" name="name" value="{hs(r['name'])}">
+      <input type="hidden" name="season" value="{hs(season)}">
+      <button class="btn btn-outline-light btn-sm" type="submit">+ Watch</button>
+    </form>
+  </td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/leaderboard/hits" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Season</label>
+      <input class="form-control" name="season" value="{hs(season)}">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Limit</label>
+      <input class="form-control" name="limit" value="{hs(limit)}">
+    </div>
+    <div class="col-12 col-md-2 d-grid">
+      <button class="btn btn-primary" type="submit">Load</button>
+    </div>
+    <div class="col-12 col-md-6 dark-muted small">
+      MLB leaders for total season hits. Use +Watch to add hitters to your Watchlist.
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Player</th>
+          <th class="text-center">Hits</th>
+          <th class="text-end">Watch</th>
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="4" class="dark-muted">No data returned.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout(f"Top Hits Leaders ({hs(season)})", body)
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
 def teams_hot_board(window: int = 14):
