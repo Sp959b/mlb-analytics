@@ -695,64 +695,35 @@ def hot_teams(window_days: int = 14) -> list[dict]:
     return rows
     
 def hits_leaders(season: int = 2025, limit: int = 50) -> list[dict]:
-    """
-    Uses MLB stats leaders endpoint (fast).
-    Returns rows: {pid, name, team, value}
-    """
-    try:
-        season = int(season)
-    except Exception:
-        season = 2025
-
-    try:
-        limit = int(limit)
-    except Exception:
-        limit = 50
-    limit = max(5, min(200, limit))
-
-    k = f"leaders:hits:{season}:{limit}"
-    cached = mem_get(k)
-    if cached is not None:
-        return cached
-
+    # Regular season leaders for hits
     data = mlb_get(
         "/api/v1/stats/leaders",
         params={
             "leaderCategories": "hits",
-            "season": season,
+            "season": int(season),
             "sportId": 1,
-            "limit": limit,
+            "limit": int(limit),
+            "gameType": "R",          # <- IMPORTANT (regular season)
+            "hydrate": "person,team", # names + teams
         },
     )
 
     leaders = (data.get("leagueLeaders") or [])
-    # MLB usually returns: [{"leaderCategory":"hits","leaders":[...]}]
-    leaders_list = (leaders[0].get("leaders") if leaders else []) or []
+    if not leaders:
+        return []
 
-    rows: list[dict] = []
-    for it in leaders_list:
-        person = (it.get("person") or {})
-        pid = person.get("id")
-        name = person.get("fullName") or ""
-        val = it.get("value")
-        team_name = ""
-        try:
-            team_name = (it.get("team") or {}).get("name") or ""
-        except Exception:
-            team_name = ""
-
-        if not pid or not name:
-            continue
-
+    rows = []
+    for item in (leaders[0].get("leaders") or []):
+        person = (item.get("person") or {})
+        team = (item.get("team") or {})
         rows.append({
-            "pid": int(pid),
-            "name": name,
-            "team": team_name or "-",
-            "hits": int(val) if str(val).isdigit() else val,
+            "pid": person.get("id"),
+            "name": person.get("fullName") or "Unknown",
+            "team": team.get("name") or "",
+            "hits": item.get("value"),  # should be ~0-220 range
         })
 
-    mem_set(k, rows, ttl=60 * 60 * 6)  # 6 hours
-    return rows
+    return rows    
     
 # ----------------------------
 # App + UI layout
