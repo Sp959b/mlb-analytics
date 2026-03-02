@@ -160,7 +160,7 @@ def home_away_splits(pid: int, season: int) -> dict:
     params = {
         "stats": "statSplits",
         "group": "hitting",
-        "sitCodes": "hm,aw",
+        "sitCodes": "h,a", 
         "season": season,
         "gameType": "R",   # <-- important (regular season)
     }
@@ -187,9 +187,9 @@ def home_away_splits(pid: int, season: int) -> dict:
         stat = s.get("stat") or {}
 
         # accept multiple possible codes
-        if code in ("hm", "h", "home"):
+        if code in ("h", "hm", "home"):
             out["home"] = stat
-        elif code in ("aw", "a", "away"):
+        elif code in ("a", "aw", "away"):
             out["away"] = stat
 
     return out    
