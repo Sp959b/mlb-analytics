@@ -747,79 +747,56 @@ def open_meteo_hourly(lat: float, lon: float) -> Optional[dict]:
     except Exception:
         return None
 
-
-def pick_hourly_weather(wx: dict, game_iso_utc: str) -> Optional[dict]:
-    if not wx or not game_iso_utc:
+def pick_hourly_weather(wx: dict, iso_utc: str) -> Optional[dict]:
+    """
+    Pick the closest hourly forecast to the game time (rounded to nearest hour).
+    Assumes Open-Meteo timezone is America/Los_Angeles (as requested).
+    """
+    if not wx or not iso_utc:
         return None
+
     hourly = wx.get("hourly") or {}
     times = hourly.get("time") or []
     if not times:
         return None
 
+    # game time -> PT
     try:
-        dt_utc = datetime.fromisoformat(game_iso_utc.replace("Z", "+00:00"))
+        dt_utc = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
         dt_pt = dt_utc.astimezone(LA_TZ)
-        target = dt_pt.replace(minute=0, second=0, microsecond=0)
-        target_s = target.strftime("%Y-%m-%dT%H:%M")
     except Exception:
         return None
 
-    idx = times.index(target_s) if target_s in times else None
-    if idx is None:
+    # Parse Open-Meteo times as *local PT naive*, because the API returns local timestamps
+    # (since you request timezone=America/Los_Angeles)
+    best_i = None
+    best_diff = None
+
+    for i, t in enumerate(times):
+        try:
+            dt_local = datetime.fromisoformat(t)  # naive local time
+            # compare against PT time made naive
+            diff = abs((dt_local - dt_pt.replace(tzinfo=None)).total_seconds())
+            if best_diff is None or diff < best_diff:
+                best_diff = diff
+                best_i = i
+        except Exception:
+            continue
+
+    if best_i is None:
         return None
 
-    def at(key):
+    def at(key: str):
         arr = hourly.get(key) or []
-        return arr[idx] if idx < len(arr) else None
+        return arr[best_i] if best_i < len(arr) else None
 
     return {
-        "time_pt": target_s,
+        "time_pt": times[best_i],
         "temp_f": at("temperature_2m"),
         "wind_mph": at("wind_speed_10m"),
         "wind_dir": at("wind_direction_10m"),
         "precip_pct": at("precipitation_probability"),
     }
-    
-
-def pick_hourly_weather(wx: dict, iso_utc: str) -> Optional[dict]:
-    """
-    Pick the closest hourly forecast to the game time.
-    """
-    if not wx or not iso_utc:
-        return None
-    hourly = wx.get("hourly") or {}
-    times = hourly.get("time") or []
-    if not times:
-        return None
-
-    try:
-        # Convert game time to PT hour string like '2026-03-01T16:00'
-        dt_utc = datetime.fromisoformat(iso_utc.replace("Z", "+00:00"))
-        dt_pt = dt_utc.astimezone(LA_TZ)
-        target = dt_pt.replace(minute=0, second=0, microsecond=0)
-        target_s = target.strftime("%Y-%m-%dT%H:%M")
-    except Exception:
-        return None
-
-    # find exact match or nearest
-    idx = None
-    if target_s in times:
-        idx = times.index(target_s)
-    else:
-        # nearest by absolute time difference
-        best = None
-        for i, t in enumerate(times[:96]):  # cap search
-            try:
-                dt = datetime.fromisoformat(t)
-                diff = abs((dt - datetime.fromisoformat(target_s)).total_seconds())
-                if best is None or diff < best[0]:
-                    best = (diff, i)
-            except Exception:
-                continue
-        idx = best[1] if best else None
-
-    if idx is None:
-        return None
 
     def get_arr(key):
         arr = hourly.get(key) or []
