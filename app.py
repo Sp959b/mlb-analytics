@@ -1173,7 +1173,20 @@ def home():
         <a class="btn btn-outline-light" href="/suggest/hitters">Auto-Suggest Hitters</a>
       </div>
     </div>
-
+<div class="mt-3">
+  <form class="row g-2 align-items-end" action="/today" method="get">
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Date</label>
+      <input class="form-control" name="date" value="{hs(day)}" placeholder="YYYY-MM-DD">
+    </div>
+    <div class="col-12 col-md-3 d-grid">
+      <button class="btn btn-outline-light" type="submit">Go to Games</button>
+    </div>
+    <div class="col-12 col-md-5 dark-muted small">
+      {int(games_n)} games on {hs(day)}
+    </div>
+  </form>
+</div>
     <!-- KPI chips -->
     <div class="d-flex gap-2 flex-wrap">
       <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
