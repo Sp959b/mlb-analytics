@@ -1117,15 +1117,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
                 name = people[0].get("fullName") or name
         except Exception:
             pass
-    try:
-        splits = eng.home_away_splits(pid, season)
-    except Exception:
-        splits = {}
-    home = splits.get("home", {}) or {}
-    away = splits.get("away", {}) or {}
-    print("HOME/AWAY OPS", pid, season, home.get("ops"), away.get("ops"))
-    already = is_in_watchlist(pid, season, "hitting")
-
+ 
     add_btn = (
         '<button class="btn btn-success" type="button" disabled>Added</button>'
         if already
