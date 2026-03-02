@@ -2870,24 +2870,26 @@ def player_splits(pid: int, season: int = datetime.now().year):
 
     splits = {}
     try:
-        spl = eng.home_away_splits(pid, season)
-        print("SPLITS DEBUG", pid, season, "keys=", list(spl.keys()), "home=", bool(spl.get("home")), "away=", bool(spl.get("away")))
+        spl = eng.home_away_splits(pid, season) or {}
+        home = spl.get("home") or {}
+        away = spl.get("away") or {}
+
+        keys = [
+          "gamesPlayed","plateAppearances","atBats","hits",
+          "avg","obp","slg","ops",
+          "homeRuns","rbi","strikeOuts","baseOnBalls"
+        ]
+
+        rows = ""
+        for k in keys:
+            rows += f"""
+        <tr>
+          <td class="text-secondary">{hs(k)}</td>
+          <td class="fw-semibold">{hs(home.get(k, "-"))}</td>
+          <td class="fw-semibold">{hs(away.get(k, "-"))}</td>
+        </tr>
+        """
         
-    except Exception:
-        splits = {}
-
-    home = splits.get("home") or {}
-    away = splits.get("away") or {}
-
-    def row(label: str, k: str) -> str:
-        return f"""
-<tr>
-  <td class="dark-muted">{hs(label)}</td>
-  <td class="text-center fw-semibold">{hs(home.get(k, "n/a"))}</td>
-  <td class="text-center fw-semibold">{hs(away.get(k, "n/a"))}</td>
-</tr>
-"""
-
     rows = ""
     rows += row("Games", "gamesPlayed")
     rows += row("PA", "plateAppearances")
@@ -2903,33 +2905,34 @@ def player_splits(pid: int, season: int = datetime.now().year):
     rows += row("OPS", "ops")
 
     body = f"""
-<div class="card-dark mb-3">
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-    <div>
-      <div class="h5 fw-semibold mb-0">{hs(name)}</div>
-      <div class="dark-muted small">Home vs Away Splits — season {hs(season)}</div>
-    </div>
-    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
-  </div>
-</div>
+        <div class="card-dark mb-3">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="h5 fw-semibold mb-0">{hs(name)}</div>
+              <div class="dark-muted small">Home vs Away splits — season {hs(season)}</div>
+            </div>
+            <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+          </div>
+        </div>
 
-<div class="card-dark">
-  <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
-      <thead>
-        <tr>
-          <th>Stat</th>
-          <th class="text-center">Home</th>
-          <th class="text-center">Away</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows if (home or away) else "<tr><td colspan='3' class='dark-muted'>No split data available.</td></tr>"}
-      </tbody>
-    </table>
-  </div>
-</div>
-"""
+        <div class="card-dark">
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead>
+                <tr>
+                  <th>Stat</th>
+                  <th class="text-center">Home</th>
+                  <th class="text-center">Away</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows if (home or away) else "<tr><td colspan='3' class='dark-muted'>No splits found.</td></tr>"}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        """
+   
     return layout("Splits", body)
     
 @app.get("/player/{pid}/zscores", response_class=HTMLResponse)
