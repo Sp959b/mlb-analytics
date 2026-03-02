@@ -161,27 +161,28 @@ def home_away_splits(pid: int, season: int) -> dict:
         data = api_get(
             f"/people/{pid}/stats",
             params={
-                "stats": "splits",
+                "stats": "statSplits",     # <-- change THIS
                 "group": "hitting",
                 "sitCodes": "hm,aw",
-                "season": int(season),
+                "season": season,
             },
         )
     except Exception:
         return {}
 
-    print("SPLIT RAW DATA:", data)  # 👈 temporary debug
+    stats = (data.get("stats") or [])
+    splits = (stats[0].get("splits") if stats else []) or []
 
-    return {}
-    
-def pretty_print_stat(stat: dict, keys: list[str]):
-    if not stat:
-        print("No stats returned for that query (player may have 0 games in that time range/season).")
-        return
-    for k in keys:
-        if k in stat:
-            print(f"{k:>18}: {stat[k]}")
+    out = {}
+    for s in splits:
+        split = (s.get("split") or {}).get("code")
+        stat = s.get("stat") or {}
+        if split == "hm":
+            out["home"] = stat
+        elif split == "aw":
+            out["away"] = stat
 
+    return out    
 
 # -----------------------------
 # Teams / standings
