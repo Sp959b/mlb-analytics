@@ -1118,7 +1118,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
         except Exception:
             pass
     
-    already = is_in_watchlist(pid, season, "hitting"
+    already = is_in_watchlist(pid, season, "hitting")
  
     add_btn = (
         '<button class="btn btn-success" type="button" disabled>Added</button>'
