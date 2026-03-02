@@ -1523,6 +1523,7 @@ def today_games(date: str = ""):
     <div>
       <div class="h5 fw-semibold mb-1">{hs(away_name)} at {hs(home_name)}</div>
       <div class="dark-muted small">{hs(day)} - {hs(start)} - {hs(venue)}</div>
+      <div class="dark-muted small">WX DEBUG: {wx_line if wx_line else "EMPTY"}</div>
       {wx_line}
     </div>
     <div class="d-flex gap-2">
