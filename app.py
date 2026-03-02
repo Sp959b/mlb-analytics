@@ -2568,7 +2568,50 @@ def hits_board(season: int = 2025, limit: int = 50):
   </div>
 </div>
 """
-    return layout(f"Hits Leaders ({hs(season)})", body)    
+    return layout(f"Hits Leaders ({hs(season)})", body) 
+    
+@app.get("/player/{pid}/hr-prop-today", response_class=HTMLResponse)
+def player_hr_prop_today(pid: int, season: int = datetime.now().year):
+    today = today_yyyy_mm_dd()
+
+    # name lookup (safe)
+    name = f"Player {pid}"
+    try:
+        pdata = eng.api_get(f"/people/{pid}")
+        people = pdata.get("people") or []
+        if people:
+            name = people[0].get("fullName") or name
+    except Exception:
+        pass
+
+    # Try to compute a simple score if engine supports it
+    detail = "No HR prop model yet."
+    score = None
+
+    if hasattr(eng, "hr_props_today_context"):
+        try:
+            ctx = eng.hr_props_today_context(pid, season, today) or {}
+            detail = f"SP: {ctx.get('sp_name','tbd')} | Park: {ctx.get('venue_name','tbd')}"
+        except Exception:
+            pass
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="h5 fw-semibold mb-0">{hs(name)}</div>
+      <div class="dark-muted small">Today HR Prop (placeholder) — {hs(today)} | season {hs(season)}</div>
+    </div>
+    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+  </div>
+</div>
+
+<div class="p-3 soft-card">
+  <div class="fw-semibold mb-1">Context</div>
+  <div class="text-secondary">{hs(detail)}</div>
+</div>
+"""
+    return layout("Today HR Prop", body)
     
 @app.get("/player/{pid}/rolling", response_class=HTMLResponse)
 def player_rolling(pid: int, season: int = datetime.now().year):
