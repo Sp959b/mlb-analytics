@@ -66,6 +66,39 @@ def park_hr_multiplier(venue_id: int | None, park_map: dict[int, float]) -> floa
 # -----------------------------
 # Lookups
 # -----------------------------
+def home_away_splits(pid: int, season: int) -> dict:
+    """
+    Returns home vs away hitting splits for a player.
+    """
+    try:
+        data = api_get(
+            f"/people/{pid}/stats",
+            params={
+                "stats": "splits",
+                "group": "hitting",
+                "sitCodes": "hm,aw",
+                "season": season,
+            },
+        )
+    except Exception:
+        return {}
+
+    stats = (data.get("stats") or [])
+    splits = (stats[0].get("splits") if stats else []) or []
+
+    out = {}
+
+    for s in splits:
+        split = (s.get("split") or {}).get("code")
+        stat = s.get("stat") or {}
+
+        if split == "hm":
+            out["home"] = stat
+        elif split == "aw":
+            out["away"] = stat
+
+    return out
+    
 def search_players(name: str) -> list[dict]:
     data = api_get("/people/search", {"names": name})
     people = data.get("people") or []
