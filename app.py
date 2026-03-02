@@ -1463,22 +1463,34 @@ def today_games(date: str = ""):
         game_iso_utc = g.get("gameDate") or ""
         start = fmt_time_pt(game_iso_utc)
 
-        wx_line = ""
-        if venue_id:
-            vd = get_venue_detail_cached(int(venue_id))
-            lat, lon = venue_lat_lon(vd or {})
-            if lat is not None and lon is not None:
-                wx = open_meteo_hourly(lat, lon)
-                w = pick_hourly_weather(wx, game_iso_utc) if wx else None
-                if w:
-                    wx_line = (
-                        f"<div class='dark-muted small'>"
-                        f"Weather: {hs(w.get('temp_f'))}°F | "
-                        f"Wind {hs(w.get('wind_mph'))} mph | "
-                        f"Rain {hs(w.get('precip_pct'))}%"
-                        f"</div>"
-                    )
+        wx_line = "<div class='dark-muted small'>Weather: (debug) starting…</div>"
 
+        if not venue_id:
+            wx_line = "<div class='dark-muted small'>Weather: (debug) no venue_id</div>"
+        else:
+            vd = get_venue_detail_cached(int(venue_id))
+            if not vd:
+                wx_line = "<div class='dark-muted small'>Weather: (debug) venue detail missing</div>"
+            else:
+                lat, lon = venue_lat_lon(vd)
+                if lat is None or lon is None:
+                    wx_line = f"<div class='dark-muted small'>Weather: (debug) missing lat/lon for venue_id {hs(venue_id)}</div>"
+                else:
+                    wx = open_meteo_hourly(lat, lon)
+                    if not wx:
+                        wx_line = f"<div class='dark-muted small'>Weather: (debug) open-meteo failed for {lat:.3f},{lon:.3f}</div>"
+                    else:
+                        w = pick_hourly_weather(wx, game_iso_utc)
+                        if not w:
+                            wx_line = f"<div class='dark-muted small'>Weather: (debug) time match failed for {hs(game_iso_utc)}</div>"
+                        else:
+                            wx_line = (
+                                f"<div class='dark-muted small'>"
+                                f"Weather: {hs(w.get('temp_f'))}°F | "
+                                f"Wind {hs(w.get('wind_mph'))} mph | "
+                                f"Rain {hs(w.get('precip_pct'))}%"
+                                f"</div>"
+                            )
         pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
         pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
         pp_home_name = pp_home.get("fullName") or "tbd"
