@@ -2368,7 +2368,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     for r in rows:
         k_str = "n/a" if r["k_exp"] is None else f"{r['k_exp']:.1f}"
         trs += f"""
-<tr class="ks-row" data-name="{hs(r['name']).lower()}">
+<tr class="ks-row" data-name="{lower_attr(r['name'])}">
   <td class="fw-semibold">{hs(r['name'])}</td>
   <td class="text-secondary small">{hs(r['detail'])}</td>
   <td class="text-center fw-semibold">{k_str}</td>
