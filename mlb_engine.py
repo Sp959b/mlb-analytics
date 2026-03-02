@@ -156,7 +156,39 @@ def get_player_stats(
     payload = api_get(f"/people/{player_id}/stats", params)
     return safe_first_stat(payload)
 
+def home_away_splits(pid: int, season: int) -> dict:
+    """
+    Returns home vs away hitting splits for a player for a season.
+    Output:
+      {"home": {...stat...}, "away": {...stat...}}
+    """
+    try:
+        data = api_get(
+            f"/people/{pid}/stats",
+            params={
+                "stats": "splits",
+                "group": "hitting",
+                "sitCodes": "hm,aw",
+                "season": int(season),
+            },
+        )
+    except Exception:
+        return {}
 
+    stats = (data.get("stats") or [])
+    splits = (stats[0].get("splits") if stats else []) or []
+
+    out: dict = {}
+    for s in splits:
+        code = ((s.get("split") or {}).get("code") or "").lower()
+        stat = s.get("stat") or {}
+        if code == "hm":
+            out["home"] = stat
+        elif code == "aw":
+            out["away"] = stat
+
+    return out
+    
 def pretty_print_stat(stat: dict, keys: list[str]):
     if not stat:
         print("No stats returned for that query (player may have 0 games in that time range/season).")
