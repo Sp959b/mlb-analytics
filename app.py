@@ -309,7 +309,66 @@ def badge_for_z(z: Optional[float]) -> str:
     else:
         cls = "text-bg-primary"
     return f'<span class="badge {cls} fs-6">{z:+.2f}</span>'
+def _sort_games_most_recent_first(games: list[dict]) -> list[dict]:
+    # Try to sort by gameDate if present; otherwise keep original order
+    def key(g: dict):
+        s = g.get("gameDate") or g.get("date") or g.get("officialDate") or ""
+        try:
+            # handle "2026-03-01" or ISO timestamps
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min
+    # sort descending (most recent first)
+    return sorted(games, key=key, reverse=True)
 
+def _rolling_metrics_for_window(games: list[dict], window: int) -> dict:
+    g = games[:window]
+    if not g:
+        return {}
+
+    ab = sum(safe_int(x.get("atBats")) for x in g)
+    h_ = sum(safe_int(x.get("hits")) for x in g)
+    hr = sum(safe_int(x.get("homeRuns")) for x in g)
+    pa = sum(safe_int(x.get("plateAppearances")) for x in g)
+    so = sum(safe_int(x.get("strikeOuts")) for x in g)
+
+    # OPS: average over games where present (simple avg; fine for display)
+    ops_vals = []
+    for x in g:
+        v = _to_float(x.get("ops"))
+        if v is not None:
+            ops_vals.append(v)
+    ops = (sum(ops_vals) / len(ops_vals)) if ops_vals else None
+
+    avg = (h_ / ab) if ab > 0 else None
+    k_pct = (so / pa) if pa > 0 else None
+    hr_g = (hr / window) if window > 0 else None
+
+    return {
+        "games": window,
+        "AVG": avg,
+        "OPS": ops,
+        "HR": hr,
+        "HR/G": hr_g,
+        "PA": pa,
+        "K%": k_pct,
+    }
+    
+def _window_series(games: list[dict], window: int, metric: str) -> list[Optional[float]]:
+    """
+    Build a series of metric values for each rolling window slice inside `games`.
+    games must be most-recent-first.
+    """
+    vals: list[Optional[float]] = []
+    if len(games) < window:
+        return vals
+
+    for i in range(0, len(games) - window + 1):
+        chunk = games[i:i + window]
+        m = _rolling_metrics_for_window(chunk, window)
+        vals.append(_to_float(m.get(metric)))
+    return vals
+    
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
@@ -2510,6 +2569,168 @@ def hits_board(season: int = 2025, limit: int = 50):
 </div>
 """
     return layout(f"Hits Leaders ({hs(season)})", body)    
+    
+@app.get("/player/{pid}/rolling", response_class=HTMLResponse)
+def player_rolling(pid: int, season: int = datetime.now().year):
+    # name
+    name = f"Player {pid}"
+    try:
+        pdata = eng.api_get(f"/people/{pid}")
+        people = pdata.get("people") or []
+        if people:
+            name = people[0].get("fullName") or name
+    except Exception:
+        pass
+
+    # game log
+    try:
+        games = eng.get_player_game_log(pid, season, "hitting") or []
+    except Exception:
+        games = []
+
+    games = _sort_games_most_recent_first(games)
+
+    windows = (7, 14, 30)
+    rows = []
+    for w in windows:
+        rows.append((w, _rolling_metrics_for_window(games, w)))
+
+    def fmt3(x):
+        v = _to_float(x)
+        return "n/a" if v is None else f"{v:.3f}"
+
+    def fmt2(x):
+        v = _to_float(x)
+        return "n/a" if v is None else f"{v:.2f}"
+
+    def fmtpct(x):
+        v = _to_float(x)
+        return "n/a" if v is None else f"{v*100:.1f}%"
+
+    trs = ""
+    for w, m in rows:
+        if not m:
+            trs += f"<tr><td class='fw-semibold'>{w}</td><td colspan='6' class='dark-muted'>not enough games</td></tr>"
+            continue
+
+        trs += f"""
+<tr>
+  <td class="fw-semibold">{w}</td>
+  <td class="text-center">{fmt3(m.get("AVG"))}</td>
+  <td class="text-center">{fmt3(m.get("OPS"))}</td>
+  <td class="text-center">{safe_int(m.get("HR"))}</td>
+  <td class="text-center">{fmt2(m.get("HR/G"))}</td>
+  <td class="text-center">{safe_int(m.get("PA"))}</td>
+  <td class="text-center">{fmtpct(m.get("K%"))}</td>
+</tr>
+"""
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="h5 fw-semibold mb-0">{hs(name)}</div>
+      <div class="dark-muted small">Rolling metrics — season {hs(season)} (most recent games)</div>
+    </div>
+    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Window</th>
+          <th class="text-center">AVG</th>
+          <th class="text-center">OPS</th>
+          <th class="text-center">HR</th>
+          <th class="text-center">HR/G</th>
+          <th class="text-center">PA</th>
+          <th class="text-center">K%</th>
+        </tr>
+      </thead>
+      <tbody>{trs}</tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Rolling 7/14/30", body)
+    
+@app.get("/player/{pid}/zscores", response_class=HTMLResponse)
+def player_zscores(pid: int, season: int = datetime.now().year):
+    # name
+    name = f"Player {pid}"
+    try:
+        pdata = eng.api_get(f"/people/{pid}")
+        people = pdata.get("people") or []
+        if people:
+            name = people[0].get("fullName") or name
+    except Exception:
+        pass
+
+    # game log
+    try:
+        games = eng.get_player_game_log(pid, season, "hitting") or []
+    except Exception:
+        games = []
+
+    games = _sort_games_most_recent_first(games)
+
+    # keep some history so z has something to compute from
+    games_hist = games[:60]  # most recent 60
+    windows = (7, 14, 30)
+    metrics = ("OPS", "AVG", "HR/G", "K%")
+
+    grid_rows = ""
+
+    for w in windows:
+        # latest window metrics
+        latest = _rolling_metrics_for_window(games_hist, w)
+        if not latest:
+            grid_rows += f"<tr><td class='fw-semibold'>{w}</td><td colspan='{len(metrics)}' class='dark-muted'>not enough games</td></tr>"
+            continue
+
+        tds = ""
+        for metric in metrics:
+            series = _window_series(games_hist, w, metric)
+            mu, sd = mean_std(series)
+            z = z_score(_to_float(latest.get(metric)), mu, sd)
+            tds += f"<td class='text-center'>{badge_for_z(z)}</td>"
+
+        grid_rows += f"<tr><td class='fw-semibold'>{w}</td>{tds}</tr>"
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center">
+    <div>
+      <div class="h5 fw-semibold mb-0">{hs(name)}</div>
+      <div class="dark-muted small">
+        Z-scores compare the most recent window vs the player’s rolling-window history (last 60 games).
+      </div>
+    </div>
+    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Window</th>
+          <th class="text-center">OPS z</th>
+          <th class="text-center">AVG z</th>
+          <th class="text-center">HR/G z</th>
+          <th class="text-center">K% z</th>
+        </tr>
+      </thead>
+      <tbody>{grid_rows}</tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Z-Scores 7/14/30", body)
     
 @app.get("/leaderboard/teams-hot", response_class=HTMLResponse)
 def teams_hot_board(window: int = 14):
