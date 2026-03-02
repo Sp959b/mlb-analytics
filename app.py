@@ -2870,7 +2870,9 @@ def player_splits(pid: int, season: int = datetime.now().year):
 
     splits = {}
     try:
-        splits = eng.home_away_splits(pid, season) or {}
+        spl = eng.home_away_splits(pid, season)
+        print("SPLITS DEBUG", pid, season, "keys=", list(spl.keys()), "home=", bool(spl.get("home")), "away=", bool(spl.get("away")))
+        
     except Exception:
         splits = {}
 
