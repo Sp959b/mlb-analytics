@@ -1227,7 +1227,8 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
       <div class="d-grid gap-2">
         <a class="btn btn-warning" href="/player/{pid}/rolling?season={season}">Rolling 7/14/30</a>
         <a class="btn btn-success" href="/player/{pid}/zscores?season={season}">Z-Scores 7/14/30</a>
-        <a class="btn btn-outline-light" href="/player/{pid}/splits?season={season}">Home vs Away</a>
+        <a class="btn btn-primary" href="/player/{pid}/splits?season={season}&group=hitting">Home/Away (Hitting)</a>
+        <a class="btn btn-danger" href="/player/{pid}/splits?season={season}&group=pitching">Home/Away (Pitching)</a>
       </div>
     </div>
   </div>
@@ -2857,7 +2858,12 @@ def player_rolling(pid: int, season: int = datetime.now().year):
     return layout("Rolling 7/14/30", body)
     
 @app.get("/player/{pid}/splits", response_class=HTMLResponse)
-def player_splits(pid: int, season: int = datetime.now().year):
+def player_splits(
+    pid: int,
+    season: int = datetime.now().year,
+    group: str = "hitting",   # <--- add this
+):
+    group = "pitching" if group == "pitching" else "hitting"
 
     # name lookup (safe)
     name = f"Player {pid}"
@@ -2869,22 +2875,27 @@ def player_splits(pid: int, season: int = datetime.now().year):
     except Exception:
         pass
 
-    # fetch splits safely
-    spl = {}
+    # fetch splits (needs engine support for pitching too — step 2)
     try:
-        spl = eng.home_away_splits(pid, season) or {}
+        spl = eng.home_away_splits(pid, season, group=group) or {}
     except Exception:
         spl = {}
 
     home = spl.get("home") or {}
     away = spl.get("away") or {}
 
-    # stats to display
-    keys = [
-        "gamesPlayed","plateAppearances","atBats","hits",
-        "avg","obp","slg","ops",
-        "homeRuns","rbi","strikeOuts","baseOnBalls"
-    ]
+    if group == "hitting":
+        keys = [
+            "gamesPlayed","plateAppearances","atBats","hits",
+            "avg","obp","slg","ops",
+            "homeRuns","rbi","strikeOuts","baseOnBalls"
+        ]
+    else:
+        keys = [
+            "gamesPlayed","gamesStarted",
+            "inningsPitched","strikeOuts","baseOnBalls","homeRuns",
+            "era","whip"
+        ]
 
     rows = ""
     for k in keys:
@@ -2898,12 +2909,17 @@ def player_splits(pid: int, season: int = datetime.now().year):
 
     body = f"""
 <div class="card-dark mb-3">
-  <div class="d-flex justify-content-between align-items-center">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
       <div class="h5 fw-semibold mb-0">{hs(name)}</div>
-      <div class="dark-muted small">Home vs Away splits — season {hs(season)}</div>
+      <div class="dark-muted small">Home vs Away splits — {hs(group)} — season {hs(season)}</div>
     </div>
-    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-light btn-sm" href="/player/{pid}/splits?season={season}&group=hitting">Hitting</a>
+      <a class="btn btn-outline-light btn-sm" href="/player/{pid}/splits?season={season}&group=pitching">Pitching</a>
+      <a class="btn btn-outline-light btn-sm" href="/player/{pid}?season={season}">Back</a>
+    </div>
   </div>
 </div>
 
@@ -2924,7 +2940,6 @@ def player_splits(pid: int, season: int = datetime.now().year):
   </div>
 </div>
 """
-
     return layout("Splits", body)
     
 @app.get("/player/{pid}/zscores", response_class=HTMLResponse)
