@@ -1051,78 +1051,227 @@ def layout(title: str, body: str) -> str:
 # ----------------------------
 @app.get("/", response_class=HTMLResponse)
 def home():
+    # --- Pull small previews (keep everything safe) ---
     try:
-        edge_preview = today_edge_board_data(limit=5)  # optional; if you don't have it, it will fall back
+        edge_preview = today_edge_board_data(limit=6)  # list of dicts (name, edge, model_p, implied, etc.)
     except Exception:
         edge_preview = []
 
     try:
-        hot_teams_preview = hot_teams(window_days=7)[:5]
+        hot_teams_preview = hot_teams(window_days=7)[:6]
     except Exception:
         hot_teams_preview = []
 
+    try:
+        parks_preview = park_leaderboard(window_days=14)[:6]
+    except Exception:
+        parks_preview = []
+
+    # optional: show today's games count
+    day = today_yyyy_mm_dd()
+    try:
+        games = get_today_games(day)
+        games_n = len(games)
+    except Exception:
+        games_n = 0
+
+    # --- Render helpers ---
+    def fmt_edge_cell(r: dict) -> str:
+        name = r.get("name", "")
+        pid = r.get("pid")
+        model_p = r.get("model_p")
+        implied = r.get("implied")
+        edge = r.get("edge")
+
+        edge_str = "n/a" if edge is None else f"{edge*100:+.1f}%"
+        model_str = "n/a" if model_p is None else f"{model_p*100:.1f}%"
+        imp_str = "n/a" if implied is None else f"{implied*100:.1f}%"
+
+        # badge color by edge
+        if edge is None:
+            badge = '<span class="badge text-bg-secondary">n/a</span>'
+        elif edge >= 0.03:
+            badge = f'<span class="badge text-bg-success">{hs(edge_str)}</span>'
+        elif edge <= -0.03:
+            badge = f'<span class="badge text-bg-danger">{hs(edge_str)}</span>'
+        else:
+            badge = f'<span class="badge text-bg-primary">{hs(edge_str)}</span>'
+
+        link = f"/player/{int(pid)}" if pid else "#"
+        return f"""
+<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
+  <div class="me-3">
+    <a class="link-light fw-semibold text-decoration-none" href="{hs(link)}">{hs(name)}</a>
+    <div class="dark-muted small">Model {hs(model_str)} · Implied {hs(imp_str)}</div>
+  </div>
+  <div class="text-end">{badge}</div>
+</div>
+"""
+
+    def fmt_team_cell(r: dict) -> str:
+        team = r.get("team", "")
+        hr_g = r.get("hr_g", 0) or 0
+        ops = r.get("ops")
+        ops_str = "n/a"
+        try:
+            if ops is not None:
+                ops_str = f"{float(ops):.3f}"
+        except Exception:
+            pass
+
+        return f"""
+<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
+  <div class="fw-semibold">{hs(team)}</div>
+  <div class="dark-muted small">HR/G {float(hr_g):.2f} · OPS {hs(ops_str)}</div>
+</div>
+"""
+
+    def fmt_park_cell(r: dict) -> str:
+        venue = r.get("venue", "")
+        hrpg = r.get("hr_per_game", 0) or 0
+        games = r.get("games", 0) or 0
+        return f"""
+<div class="d-flex justify-content-between align-items-center py-2 border-bottom border-light border-opacity-10">
+  <div class="fw-semibold">{hs(venue)}</div>
+  <div class="dark-muted small">HR/G {float(hrpg):.2f} · Games {int(games)}</div>
+</div>
+"""
+
+    # --- Build sections ---
     edge_html = (
-        "".join(
-            f"<div>{hs(r.get('name',''))} <span class='dark-muted small'>{hs(r.get('edge',''))}</span></div>"
-            for r in edge_preview
-        )
+        "".join(fmt_edge_cell(r) for r in edge_preview)
         if edge_preview
-        else "<div class='dark-muted'>No data yet.</div>"
+        else "<div class='dark-muted'>Add hitters to your Watchlist → then Today Edge populates here.</div>"
     )
 
     teams_html = (
-        "".join(
-            f"<div>{hs(r.get('team',''))} — HR/G {float(r.get('hr_g',0) or 0):.2f}</div>"
-            for r in hot_teams_preview
-        )
+        "".join(fmt_team_cell(r) for r in hot_teams_preview)
         if hot_teams_preview
-        else "<div class='dark-muted'>No data yet.</div>"
+        else "<div class='dark-muted'>No recent team data yet.</div>"
+    )
+
+    parks_html = (
+        "".join(fmt_park_cell(r) for r in parks_preview)
+        if parks_preview
+        else "<div class='dark-muted'>No park data yet.</div>"
     )
 
     body = f"""
+<!-- HERO -->
 <div class="card-dark mb-4 p-4">
-  <div class="display-6 fw-bold">MLB Betting Analytics</div>
-  <div class="dark-muted mt-2">
-    Identify HR edges, hot offenses, favorable parks, and sharp betting spots.
-  </div>
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+    <div>
+      <div class="display-6 fw-bold">MLB Betting Analytics</div>
+      <div class="dark-muted mt-2">
+        HR edges, hot offenses, favorable parks, and daily prop tools.
+      </div>
 
-  <div class="mt-4 d-flex gap-3 flex-wrap">
-    <a class="btn btn-danger btn-lg" href="/leaderboard/hits?season=2025">Hit Leaders</a>  
-    <a class="btn btn-primary btn-lg" href="/today-edge">Today Edge Board</a>
-    <a class="btn btn-warning btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
-    <a class="btn btn-danger btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
-    <a class="btn btn-primary btn-lg" href="/leaderboard/parks">Park Board</a>
-    <a class="btn btn-warning btn-lg" href="/today">Today Games</a>
-    <a class="btn btn-primary btn-lg" href="/today-hitters">Today&apos;s Hitters</a>
-    <a class="btn btn-danger btn-lg" href="/today-ks">Today Ks</a>
-    <a class="btn btn-primary btn-lg" href="/suggest/hitters">Auto-Suggest Hitters</a>
-    <a class="btn btn-warning btn-lg" href="/today-hits">Today Hits</a>
-    <a class="btn btn-primary btn-lg" href="/today">Today</a>
+      <div class="d-flex gap-2 flex-wrap mt-3">
+        <a class="btn btn-primary" href="/today-edge">Today Edge</a>
+        <a class="btn btn-warning" href="/leaderboard/hr-props">HR Props Board</a>
+        <a class="btn btn-outline-light" href="/watchlist">Watchlist</a>
+        <a class="btn btn-outline-light" href="/suggest/hitters">Auto-Suggest Hitters</a>
+      </div>
+    </div>
+
+    <!-- KPI chips -->
+    <div class="d-flex gap-2 flex-wrap">
+      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
+        <div class="dark-muted small">Today</div>
+        <div class="fw-semibold">{hs(day)}</div>
+      </div>
+      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
+        <div class="dark-muted small">Games</div>
+        <div class="fw-semibold">{int(games_n)}</div>
+      </div>
+      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
+        <div class="dark-muted small">Quick</div>
+        <div class="fw-semibold">Search any player</div>
+      </div>
+    </div>
   </div>
 </div>
 
+<!-- SEARCH -->
 <div class="card-dark mb-4 p-3">
   <form class="d-flex gap-2" action="/search" method="get">
     <input class="form-control form-control-lg" name="q"
-           placeholder="Search player (e.g., Aaron Judge)" autocomplete="off">
+           placeholder="Search a player (e.g., Aaron Judge)" autocomplete="off">
     <button class="btn btn-primary btn-lg" type="submit">Search</button>
   </form>
 </div>
 
+<!-- MAIN GRID -->
 <div class="row g-3">
+
+  <!-- Left: Today Edge preview -->
   <div class="col-12 col-lg-6">
-    <div class="card-dark p-3">
-      <div class="fw-semibold mb-2">Top HR Edges Today</div>
+    <div class="card-dark p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold">Top HR Edges Today</div>
+        <a class="btn btn-outline-light btn-sm" href="/today-edge">Open</a>
+      </div>
+      <div class="dark-muted small mb-2">Sorted by (Model − Implied). Green = positive edge.</div>
       {edge_html}
     </div>
   </div>
 
+  <!-- Right: Hot teams -->
   <div class="col-12 col-lg-6">
-    <div class="card-dark p-3">
-      <div class="fw-semibold mb-2">Hottest Teams (7d)</div>
+    <div class="card-dark p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold">Hottest Teams (7d)</div>
+        <a class="btn btn-outline-light btn-sm" href="/leaderboard/teams-hot">Open</a>
+      </div>
+      <div class="dark-muted small mb-2">Ranked by HR/G then OPS then R/G.</div>
       {teams_html}
     </div>
   </div>
+
+  <!-- Parks -->
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3 h-100">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold">Hottest Parks (14d)</div>
+        <a class="btn btn-outline-light btn-sm" href="/leaderboard/parks?window=14">Open</a>
+      </div>
+      <div class="dark-muted small mb-2">HR per game based on completed games.</div>
+      {parks_html}
+    </div>
+  </div>
+
+  <!-- Quick links -->
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3 h-100">
+      <div class="fw-semibold mb-2">Quick Tools</div>
+
+      <div class="row g-2">
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/today">Today Games</a>
+        </div>
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/today-hitters">Today&apos;s Hitters</a>
+        </div>
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/today-hits">Today Hits</a>
+        </div>
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/today-ks">Today Ks</a>
+        </div>
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/leaderboard/heat">Heat Board</a>
+        </div>
+        <div class="col-6">
+          <a class="btn btn-outline-light w-100" href="/leaderboard/hits?season=2025">Hit Leaders</a>
+        </div>
+      </div>
+
+      <div class="dark-muted small mt-3">
+        Tip: use <strong>Auto-Suggest Hitters</strong> → add to Watchlist → Edge/HR boards populate.
+      </div>
+    </div>
+  </div>
+
 </div>
 """
     return layout("MLB Analytics Dashboard", body)
