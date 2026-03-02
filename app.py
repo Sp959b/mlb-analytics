@@ -1523,6 +1523,7 @@ def watchlist():
     </div>
     <form action="/watchlist/remove" method="post">
       <input type="hidden" name="index" value="{i}">
+      <input type="hidden" name="group" value="pitching">
       <button class="btn btn-outline-danger btn-sm" type="submit">Remove</button>
     </form>
   </div>
