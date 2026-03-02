@@ -157,29 +157,32 @@ def get_player_stats(
     return safe_first_stat(payload)
     
 def home_away_splits(pid: int, season: int) -> dict:
+    params = {
+        "stats": "statSplits",
+        "group": "hitting",
+        "sitCodes": "hm,aw",
+        "season": season,
+        "gameType": "R",   # <-- important (regular season)
+    }
+
     try:
-        data = api_get(
-            f"/people/{pid}/stats",
-            params={
-                "stats": "statSplits",     # <-- change THIS
-                "group": "hitting",
-                "sitCodes": "hm,aw",
-                "season": season,
-            },
-        )
+        data = api_get(f"/people/{pid}/stats", params=params)
     except Exception:
         return {}
 
-    stats = (data.get("stats") or [])
-    splits = (stats[0].get("splits") if stats else []) or []
+    stats_list = data.get("stats") or []
+    splits = (stats_list[0].get("splits") if stats_list else []) or []
 
     out = {}
     for s in splits:
-        split = (s.get("split") or {}).get("code")
+        split_obj = s.get("split") or {}
+        code = (split_obj.get("code") or split_obj.get("abbreviation") or "").lower()
         stat = s.get("stat") or {}
-        if split == "hm":
+
+        # accept multiple possible codes
+        if code in ("hm", "h", "home"):
             out["home"] = stat
-        elif split == "aw":
+        elif code in ("aw", "a", "away"):
             out["away"] = stat
 
     return out    
