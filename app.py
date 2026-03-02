@@ -1198,7 +1198,12 @@ def home():
       <form class="row g-2 align-items-end mb-2" action="/today" method="get">
         <div class="col-7">
           <label class="form-label dark-muted small mb-0">Date</label>
-          <input class="form-control" name="date" value="{hs(day)}" placeholder="YYYY-MM-DD">
+        <input
+          class="form-control"
+          type="date"
+          name="date"
+          value="{hs(day)}"
+        />    
         </div>
         <div class="col-5 d-grid">
           <button class="btn btn-outline-light" type="submit">Games</button>
@@ -1811,7 +1816,7 @@ def today_games(date: str = ""):
   <form class="row g-2 align-items-end" action="/today" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date (YYYY-MM-DD)</label>
-      <input class="form-control" name="date" value="{hs(day)}">
+      <input class="form-control" type="date" name="date" value="{hs(day)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Load</button>
