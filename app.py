@@ -2571,8 +2571,27 @@ def hits_board(season: int = 2025, limit: int = 50):
     return layout(f"Hits Leaders ({hs(season)})", body) 
     
 @app.get("/player/{pid}/hr-prop-today", response_class=HTMLResponse)
-def player_hr_prop_today(pid: int, season: int = datetime.now().year):
+def player_hr_prop_today(pid: int, season: int = datetime.now().year, window: int = 14, pa_proj: float = 4.2):
     today = today_yyyy_mm_dd()
+
+    # normalize
+    try:
+        season = int(season)
+    except Exception:
+        season = datetime.now().year
+
+    try:
+        window = int(window)
+    except Exception:
+        window = 14
+    if window not in (7, 14, 30):
+        window = 14
+
+    try:
+        pa_proj = float(pa_proj)
+    except Exception:
+        pa_proj = 4.2
+    pa_proj = max(1.0, min(6.5, pa_proj))
 
     # name lookup (safe)
     name = f"Player {pid}"
@@ -2584,35 +2603,171 @@ def player_hr_prop_today(pid: int, season: int = datetime.now().year):
     except Exception:
         pass
 
-    # Try to compute a simple score if engine supports it
-    detail = "No HR prop model yet."
-    score = None
+    # baseline season HR/PA
+    p_season = None
+    pa_season = None
+    hr_season = None
+    try:
+        p_season, pa_season, hr_season = eng.season_hr_rate_from_season_stats(pid, season)
+    except Exception:
+        pass
+
+    # context (SP + Park multipliers)
+    ctx = None
+    p_adj = float(p_season) if p_season is not None else None
+    park_mult = None
+    sp_mult = None
 
     if hasattr(eng, "hr_props_today_context"):
         try:
-            ctx = eng.hr_props_today_context(pid, season, today) or {}
-            detail = f"SP: {ctx.get('sp_name','tbd')} | Park: {ctx.get('venue_name','tbd')}"
+            ctx = eng.hr_props_today_context(pid, season, today) or None
+        except Exception:
+            ctx = None
+
+    if ctx:
+        park_mult = ctx.get("park_mult")
+        sp_mult = ctx.get("sp_mult")
+
+    if p_adj is not None:
+        try:
+            if park_mult is not None:
+                p_adj *= float(park_mult)
         except Exception:
             pass
+        try:
+            if sp_mult is not None:
+                p_adj *= float(sp_mult)
+        except Exception:
+            pass
+        p_adj = min(max(p_adj, 0.00001), 0.25)
+
+    model_p = model_hr_game_prob(p_adj, pa_proj=pa_proj) if p_adj is not None else None
+
+    # recent window z-score (uses your engine binomial z)
+    z = None
+    hr_win = None
+    pa_win = None
+    try:
+        games = eng.get_player_game_log(pid, season, "hitting") or []
+    except Exception:
+        games = []
+
+    if p_adj is not None and games and len(games) >= window:
+        try:
+            pa_win = safe_int(sum(float(g.get("plateAppearances", 0) or 0) for g in games[:window]))
+            hr_win = safe_int(sum(float(g.get("homeRuns", 0) or 0) for g in games[:window]))
+            if pa_win > 0:
+                z = eng.hr_binomial_z(hr_win, pa_win, p_adj)
+        except Exception:
+            z = None
+
+    # odds + edge (optional)
+    odds_obj = load_odds()
+    amer = get_odds(pid, today, odds_obj=odds_obj)
+    implied = american_to_implied_prob(amer)
+    edge = (model_p - implied) if (model_p is not None and implied is not None) else None
+
+    ctx_str = "No game context yet"
+    if ctx:
+        ctx_str = f"SP: {ctx.get('sp_name','tbd')} | Park: {ctx.get('venue_name','tbd')}"
+
+    odds_val = "" if amer is None else str(amer)
+    edge_str = "n/a" if edge is None else f"{edge*100:+.1f}%"
 
     body = f"""
 <div class="card-dark mb-3">
-  <div class="d-flex justify-content-between align-items-center">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
       <div class="h5 fw-semibold mb-0">{hs(name)}</div>
-      <div class="dark-muted small">Today HR Prop (placeholder) — {hs(today)} | season {hs(season)}</div>
+      <div class="dark-muted small">Today HR Prop — {hs(today)} | season {hs(season)}</div>
+      <div class="dark-muted small">{hs(ctx_str)}</div>
     </div>
-    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+      <a class="btn btn-outline-light" href="/leaderboard/hr-props">HR Props Board</a>
+    </div>
   </div>
 </div>
 
-<div class="p-3 soft-card">
-  <div class="fw-semibold mb-1">Context</div>
-  <div class="text-secondary">{hs(detail)}</div>
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3">
+      <div class="fw-semibold mb-2">Baseline</div>
+      <div class="dark-muted small">Season HR/PA: <span class="fw-semibold">{hs(f"{p_season:.4f}" if p_season is not None else "n/a")}</span></div>
+      <div class="dark-muted small">Adjusted HR/PA: <span class="fw-semibold">{hs(f"{p_adj:.4f}" if p_adj is not None else "n/a")}</span></div>
+      <div class="dark-muted small">Park mult: {hs(f"{float(park_mult):.2f}" if park_mult is not None else "n/a")} | SP mult: {hs(f"{float(sp_mult):.2f}" if sp_mult is not None else "n/a")}</div>
+      <div class="dark-muted small">Season totals: HR {hs(hr_season)} | PA {hs(pa_season)}</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="card-dark p-3">
+      <div class="fw-semibold mb-2">Today HR%</div>
+      <div class="display-6 fw-bold">{hs(fmt_pct(model_p))}</div>
+      <div class="dark-muted small">Model = 1 - (1 - HR/PA)^PA (PAproj={hs(pa_proj)})</div>
+
+      <hr class="border-light opacity-25">
+
+      <div class="fw-semibold mb-1">Recent Form</div>
+      <div class="dark-muted small">Last {hs(window)}: HR {hs(hr_win)} / PA {hs(pa_win)}</div>
+      <div class="mt-2">Z-score: {badge_for_z(z)}</div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <div class="card-dark p-3">
+      <div class="fw-semibold mb-2">Odds & Edge (optional)</div>
+
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-5">
+          <form action="/odds/set" method="post" class="d-flex gap-2">
+            <input type="hidden" name="pid" value="{pid}">
+            <input type="hidden" name="date" value="{hs(today)}">
+            <input type="hidden" name="next" value="/player/{pid}/hr-prop-today?season={season}&window={window}&pa_proj={hs(pa_proj)}">
+            <input class="form-control" name="odds" value="{hs(odds_val)}" placeholder="+320 / -110">
+            <button class="btn btn-outline-secondary" type="submit">Save</button>
+          </form>
+        </div>
+        <div class="col-12 col-md-2">
+          <form action="/odds/clear" method="post">
+            <input type="hidden" name="pid" value="{pid}">
+            <input type="hidden" name="date" value="{hs(today)}">
+            <input type="hidden" name="next" value="/player/{pid}/hr-prop-today?season={season}&window={window}&pa_proj={hs(pa_proj)}">
+            <button class="btn btn-outline-danger w-100" type="submit">Clear</button>
+          </form>
+        </div>
+        <div class="col-12 col-md-5">
+          <div class="dark-muted small">Implied: <span class="fw-semibold">{hs(fmt_pct(implied))}</span></div>
+          <div class="dark-muted small">Edge: <span class="fw-semibold">{hs(edge_str)}</span></div>
+        </div>
+      </div>
+
+      <hr class="border-light opacity-25">
+
+      <form class="row g-2 align-items-end" action="/player/{pid}/hr-prop-today" method="get">
+        <input type="hidden" name="season" value="{season}">
+        <div class="col-6 col-md-2">
+          <label class="form-label dark-muted small mb-0">Window</label>
+          <select class="form-select" name="window">
+            <option value="7" {"selected" if window==7 else ""}>7</option>
+            <option value="14" {"selected" if window==14 else ""}>14</option>
+            <option value="30" {"selected" if window==30 else ""}>30</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label dark-muted small mb-0">PA proj</label>
+          <input class="form-control" name="pa_proj" value="{hs(pa_proj)}">
+        </div>
+        <div class="col-12 col-md-2 d-grid">
+          <button class="btn btn-primary" type="submit">Refresh</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 """
     return layout("Today HR Prop", body)
-    
+        
 @app.get("/player/{pid}/rolling", response_class=HTMLResponse)
 def player_rolling(pid: int, season: int = datetime.now().year):
     # name
