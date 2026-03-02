@@ -1485,7 +1485,6 @@ def today_games(date: str = ""):
         venue_id = venue_obj.get("id")
         game_iso_utc = g.get("gameDate") or ""
         start = fmt_time_pt(game_iso_utc)
-        wx_line = f"<div class='dark-muted small'>DEBUG venue_id={venue_id} lat={lat} lon={lon}</div>"
 
         wx_line = ""
         if venue_id:
@@ -1524,7 +1523,7 @@ def today_games(date: str = ""):
     <div>
       <div class="h5 fw-semibold mb-1">{hs(away_name)} at {hs(home_name)}</div>
       <div class="dark-muted small">{hs(day)} - {hs(start)} - {hs(venue)}</div>
-      <div class="dark-muted small">WX DEBUG: {wx_line if wx_line else "EMPTY"}</div>
+      
       {wx_line}
     </div>
     <div class="d-flex gap-2">
