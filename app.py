@@ -1117,7 +1117,13 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
                 name = people[0].get("fullName") or name
         except Exception:
             pass
-
+    try:
+        splits = eng.home_away_splits(pid, season)
+    except Exception:
+        splits = {}
+    home = splits.get("home", {}) or {}
+    away = splits.get("away", {}) or {}
+    print("HOME/AWAY OPS", pid, season, home.get("ops"), away.get("ops"))
     already = is_in_watchlist(pid, season, "hitting")
 
     add_btn = (
@@ -1148,6 +1154,38 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
       </form>
       {add_btn}
     </div>
+  </div>
+</div>
+    <div class="col-12 col-md-6">
+  <div class="card-dark">
+    <div class="fw-semibold mb-2">Home vs Road</div>
+    <table class="table table-sm mb-0">
+      <thead>
+        <tr>
+          <th></th>
+          <th class="text-center">AVG</th>
+          <th class="text-center">OPS</th>
+          <th class="text-center">HR</th>
+          <th class="text-center">PA</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="fw-semibold">Home</td>
+          <td class="text-center">{fmt(home.get("avg"))}</td>
+          <td class="text-center">{fmt(home.get("ops"))}</td>
+          <td class="text-center">{fmt(home.get("homeRuns"))}</td>
+          <td class="text-center">{fmt(home.get("plateAppearances"))}</td>
+        </tr>
+        <tr>
+          <td class="fw-semibold">Away</td>
+          <td class="text-center">{fmt(away.get("avg"))}</td>
+          <td class="text-center">{fmt(away.get("ops"))}</td>
+          <td class="text-center">{fmt(away.get("homeRuns"))}</td>
+          <td class="text-center">{fmt(away.get("plateAppearances"))}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
