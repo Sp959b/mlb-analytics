@@ -1156,39 +1156,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
     </div>
   </div>
 </div>
-    <div class="col-12 col-md-6">
-  <div class="card-dark">
-    <div class="fw-semibold mb-2">Home vs Road</div>
-    <table class="table table-sm mb-0">
-      <thead>
-        <tr>
-          <th></th>
-          <th class="text-center">AVG</th>
-          <th class="text-center">OPS</th>
-          <th class="text-center">HR</th>
-          <th class="text-center">PA</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td class="fw-semibold">Home</td>
-          <td class="text-center">{fmt(home.get("avg"))}</td>
-          <td class="text-center">{fmt(home.get("ops"))}</td>
-          <td class="text-center">{fmt(home.get("homeRuns"))}</td>
-          <td class="text-center">{fmt(home.get("plateAppearances"))}</td>
-        </tr>
-        <tr>
-          <td class="fw-semibold">Away</td>
-          <td class="text-center">{fmt(away.get("avg"))}</td>
-          <td class="text-center">{fmt(away.get("ops"))}</td>
-          <td class="text-center">{fmt(away.get("homeRuns"))}</td>
-          <td class="text-center">{fmt(away.get("plateAppearances"))}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
+    
 <div class="row g-3">
   <div class="col-12 col-md-6">
     <div class="card-dark">
