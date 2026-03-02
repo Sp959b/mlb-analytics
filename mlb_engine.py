@@ -156,43 +156,39 @@ def get_player_stats(
     payload = api_get(f"/people/{player_id}/stats", params)
     return safe_first_stat(payload)
     
-def home_away_splits(pid: int, season: int) -> dict:
-    params = {
-        "stats": "statSplits",
-        "group": "hitting",
-        "sitCodes": "h,a", 
-        "season": season,
-        "gameType": "R",   # <-- important (regular season)
-    }
+def home_away_splits(pid: int, season: int, group: str = "hitting") -> dict:
+    """
+    Returns home vs away splits for a player (hitting or pitching).
+    """
+    group = "pitching" if group == "pitching" else "hitting"
 
     try:
-        data = api_get(f"/people/{pid}/stats", params=params)
-        print("SPLITS REQ", pid, season, params)
-        print("SPLITS TOPKEYS", list(data.keys()))
-        print("SPLITS stats_len", len(data.get("stats") or []),
-              "splits_len", len(((data.get("stats") or [{}])[0].get("splits") or [])))
-        if (data.get("stats") or []) and ((data["stats"][0].get("splits") or [])):
-            first = data["stats"][0]["splits"][0]
-            print("SPLITS first split=", (first.get("split") or {}), "stat_keys=", list((first.get("stat") or {}).keys())[:10])
+        data = api_get(
+            f"/people/{pid}/stats",
+            params={
+                "stats": "statSplits",
+                "group": group,
+                "sitCodes": "h,a",     # IMPORTANT: this is what worked in your logs
+                "season": season,
+                "gameType": "R",
+            },
+        )
     except Exception:
         return {}
 
-    stats_list = data.get("stats") or []
-    splits = (stats_list[0].get("splits") if stats_list else []) or []
+    stats = (data.get("stats") or [])
+    splits = (stats[0].get("splits") if stats else []) or []
 
     out = {}
     for s in splits:
-        split_obj = s.get("split") or {}
-        code = (split_obj.get("code") or split_obj.get("abbreviation") or "").lower()
+        code = (s.get("split") or {}).get("code")   # "h" or "a"
         stat = s.get("stat") or {}
-
-        # accept multiple possible codes
-        if code in ("h", "hm", "home"):
+        if code == "h":
             out["home"] = stat
-        elif code in ("a", "aw", "away"):
+        elif code == "a":
             out["away"] = stat
 
-    return out    
+    return out
 
 # -----------------------------
 # Teams / standings
