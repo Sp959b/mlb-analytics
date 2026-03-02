@@ -1187,24 +1187,7 @@ def home():
     </div>
   </form>
 </div>
-    <!-- KPI chips -->
-    <div class="d-flex gap-2 flex-wrap">
-      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
-        <div class="dark-muted small">Today</div>
-        <div class="fw-semibold">{hs(day)}</div>
-      </div>
-      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
-        <div class="dark-muted small">Games</div>
-        <div class="fw-semibold">{int(games_n)}</div>
-      </div>
-      <div class="px-3 py-2 rounded-3 border border-light border-opacity-10">
-        <div class="dark-muted small">Quick</div>
-        <div class="fw-semibold">Search any player</div>
-      </div>
-    </div>
-  </div>
-</div>
-
+   
 <!-- SEARCH -->
 <div class="card-dark mb-4 p-3">
   <form class="d-flex gap-2" action="/search" method="get">
