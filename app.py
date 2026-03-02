@@ -1479,8 +1479,8 @@ def today_games(date: str = ""):
         game_iso_utc = g.get("gameDate") or ""
         start = fmt_time_pt(game_iso_utc)
 
-        wx_line = "<div class='dark-muted small'>Weather: (debug) starting…</div>"
-
+        wx_line = "" 
+        
         if not venue_id:
             wx_line = ""
         if venue_id:
