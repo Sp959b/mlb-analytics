@@ -1227,6 +1227,7 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
       <div class="d-grid gap-2">
         <a class="btn btn-warning" href="/player/{pid}/rolling?season={season}">Rolling 7/14/30</a>
         <a class="btn btn-success" href="/player/{pid}/zscores?season={season}">Z-Scores 7/14/30</a>
+        <a class="btn btn-outline-light" href="/player/{pid}/splits?season={season}">Home vs Away</a>
       </div>
     </div>
   </div>
@@ -2854,6 +2855,80 @@ def player_rolling(pid: int, season: int = datetime.now().year):
 </div>
 """
     return layout("Rolling 7/14/30", body)
+    
+@app.get("/player/{pid}/splits", response_class=HTMLResponse)
+def player_splits(pid: int, season: int = datetime.now().year):
+    # name lookup (safe)
+    name = f"Player {pid}"
+    try:
+        pdata = eng.api_get(f"/people/{pid}")
+        people = pdata.get("people") or []
+        if people:
+            name = people[0].get("fullName") or name
+    except Exception:
+        pass
+
+    splits = {}
+    try:
+        splits = eng.home_away_splits(pid, season) or {}
+    except Exception:
+        splits = {}
+
+    home = splits.get("home") or {}
+    away = splits.get("away") or {}
+
+    def row(label: str, k: str) -> str:
+        return f"""
+<tr>
+  <td class="dark-muted">{hs(label)}</td>
+  <td class="text-center fw-semibold">{hs(home.get(k, "n/a"))}</td>
+  <td class="text-center fw-semibold">{hs(away.get(k, "n/a"))}</td>
+</tr>
+"""
+
+    rows = ""
+    rows += row("Games", "gamesPlayed")
+    rows += row("PA", "plateAppearances")
+    rows += row("AB", "atBats")
+    rows += row("H", "hits")
+    rows += row("HR", "homeRuns")
+    rows += row("RBI", "rbi")
+    rows += row("BB", "baseOnBalls")
+    rows += row("K", "strikeOuts")
+    rows += row("AVG", "avg")
+    rows += row("OBP", "obp")
+    rows += row("SLG", "slg")
+    rows += row("OPS", "ops")
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <div class="h5 fw-semibold mb-0">{hs(name)}</div>
+      <div class="dark-muted small">Home vs Away Splits — season {hs(season)}</div>
+    </div>
+    <a class="btn btn-outline-light" href="/player/{pid}?season={season}">Back</a>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Stat</th>
+          <th class="text-center">Home</th>
+          <th class="text-center">Away</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows if (home or away) else "<tr><td colspan='3' class='dark-muted'>No split data available.</td></tr>"}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Splits", body)
     
 @app.get("/player/{pid}/zscores", response_class=HTMLResponse)
 def player_zscores(pid: int, season: int = datetime.now().year):
