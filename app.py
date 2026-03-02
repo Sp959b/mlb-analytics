@@ -1933,7 +1933,7 @@ def today_hitters(date: str = ""):
   <form class="row g-2 align-items-end" action="/today-hitters" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date</label>
-      <input class="form-control" name="date" value="{hs(day)}">
+      <input class="form-control" type="date" name="date" value="{hs(day)}">
     </div>
     <div class="col-12 col-md-2 d-grid">
       <button class="btn btn-primary" type="submit">Load</button>
@@ -2694,7 +2694,7 @@ def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
   <form class="row g-2 align-items-end" action="/suggest/hitters" method="get">
     <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Date</label>
-      <input class="form-control" name="date" value="{hs(day)}">
+      <input class="form-control" type="date" name="date" value="{hs(day)}">
     </div>
     <div class="col-6 col-md-2">
       <label class="form-label dark-muted small mb-0">Per team</label>
