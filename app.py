@@ -1494,8 +1494,17 @@ def player_season(pid: int, group: str = "hitting", season: int = datetime.now()
     return layout("Season Stats", body)
 
 @app.post("/watchlist/add")
-def watchlist_add(pid: int = Form(...), name: str = Form(...), season: int = Form(...)):
-    add_watch(pid=int(pid), name=str(name).strip() or f"ID {pid}", season=int(season), group="hitting")
+def watchlist_add(
+    pid: int = Form(...),
+    name: str = Form(...),
+    season: int = Form(...),
+    group: str = Form("hitting"),
+):
+    group = (group or "hitting").strip().lower()
+    if group not in ("hitting", "pitching"):
+        group = "hitting"
+
+    add_watch(pid=int(pid), name=str(name).strip() or f"ID {pid}", season=int(season), group=group)
     return RedirectResponse("/watchlist", status_code=303)
 
 @app.get("/watchlist", response_class=HTMLResponse)
