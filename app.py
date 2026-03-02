@@ -52,6 +52,12 @@ for d in (TEAM_CACHE_DIR, GAME_CACHE_DIR, PARK_CACHE_DIR):
 
 MLB_BASE = "https://statsapi.mlb.com"
 
+# Some MLB venues don't include coordinates in StatsAPI.
+# Fallback lat/lon map for Open-Meteo.
+VENUE_COORD_FALLBACK: dict[int, tuple[float, float]] = {
+    4309: (26.5219, -81.8711),  # JetBlue Park at Fenway South (Fort Myers, FL)
+}
+
 # ----------------------------
 # In-memory TTL cache
 # ----------------------------
@@ -709,19 +715,29 @@ def get_venue_detail_cached(venue_id: int) -> Optional[dict]:
         return v
     except Exception:
         return None
+        
+def venue_lat_lon(venue_id: Optional[int], v: dict) -> tuple[Optional[float], Optional[float]]:
+    # 1) hard fallback first
+    if venue_id and int(venue_id) in VENUE_COORD_FALLBACK:
+        lat, lon = VENUE_COORD_FALLBACK[int(venue_id)]
+        return (float(lat), float(lon))
 
-def venue_lat_lon(v: dict) -> tuple[Optional[float], Optional[float]]:
     if not v:
         return (None, None)
+
     loc = v.get("location") or {}
     coords = loc.get("defaultCoordinates") or {}
-    lat = coords.get("latitude") or loc.get("latitude")
-    lon = coords.get("longitude") or loc.get("longitude")
+
+    # 2) try a few shapes
+    lat = coords.get("latitude") or loc.get("latitude") or v.get("latitude")
+    lon = coords.get("longitude") or loc.get("longitude") or v.get("longitude")
+
     try:
+        if lat is None or lon is None:
+            return (None, None)
         return (float(lat), float(lon))
     except Exception:
         return (None, None)
-
 
 def open_meteo_hourly(lat: float, lon: float) -> Optional[dict]:
     k = f"wx:{lat:.3f},{lon:.3f}:{today_yyyy_mm_dd()}"
@@ -1466,31 +1482,22 @@ def today_games(date: str = ""):
         wx_line = "<div class='dark-muted small'>Weather: (debug) starting…</div>"
 
         if not venue_id:
-            wx_line = "<div class='dark-muted small'>Weather: (debug) no venue_id</div>"
-        else:
+            wx_line = ""
+        if venue_id:
             vd = get_venue_detail_cached(int(venue_id))
-            if not vd:
-                wx_line = "<div class='dark-muted small'>Weather: (debug) venue detail missing</div>"
-            else:
-                lat, lon = venue_lat_lon(vd)
-                if lat is None or lon is None:
-                    wx_line = f"<div class='dark-muted small'>Weather: (debug) missing lat/lon for venue_id {hs(venue_id)}</div>"
-                else:
-                    wx = open_meteo_hourly(lat, lon)
-                    if not wx:
-                        wx_line = f"<div class='dark-muted small'>Weather: (debug) open-meteo failed for {lat:.3f},{lon:.3f}</div>"
-                    else:
-                        w = pick_hourly_weather(wx, game_iso_utc)
-                        if not w:
-                            wx_line = f"<div class='dark-muted small'>Weather: (debug) time match failed for {hs(game_iso_utc)}</div>"
-                        else:
-                            wx_line = (
-                                f"<div class='dark-muted small'>"
-                                f"Weather: {hs(w.get('temp_f'))}°F | "
-                                f"Wind {hs(w.get('wind_mph'))} mph | "
-                                f"Rain {hs(w.get('precip_pct'))}%"
-                                f"</div>"
-                            )
+            lat, lon = venue_lat_lon(venue_id, vd or {})
+            if lat is not None and lon is not None:
+                wx = open_meteo_hourly(lat, lon)
+                w = pick_hourly_weather(wx, game_iso_utc) if wx else None
+                if w:
+                    wx_line = (
+                        f"<div class='dark-muted small'>"
+                        f"Weather: {hs(w.get('temp_f'))}°F | "
+                        f"Wind {hs(w.get('wind_mph'))} mph | "
+                        f"Rain {hs(w.get('precip_pct'))}%"
+                        f"</div>"
+                    )
+            
         pp_home = g.get("teams", {}).get("home", {}).get("probablePitcher") or {}
         pp_away = g.get("teams", {}).get("away", {}).get("probablePitcher") or {}
         pp_home_name = pp_home.get("fullName") or "tbd"
