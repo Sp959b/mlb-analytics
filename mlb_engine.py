@@ -167,6 +167,13 @@ def home_away_splits(pid: int, season: int) -> dict:
 
     try:
         data = api_get(f"/people/{pid}/stats", params=params)
+        print("SPLITS REQ", pid, season, params)
+        print("SPLITS TOPKEYS", list(data.keys()))
+        print("SPLITS stats_len", len(data.get("stats") or []),
+              "splits_len", len(((data.get("stats") or [{}])[0].get("splits") or [])))
+        if (data.get("stats") or []) and ((data["stats"][0].get("splits") or [])):
+            first = data["stats"][0]["splits"][0]
+            print("SPLITS first split=", (first.get("split") or {}), "stat_keys=", list((first.get("stat") or {}).keys())[:10])
     except Exception:
         return {}
 
