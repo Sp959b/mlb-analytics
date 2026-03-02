@@ -1049,11 +1049,32 @@ def layout(title: str, body: str) -> str:
 # ----------------------------
 # Routes
 # ----------------------------
+@app.get("/api/search-players")
+def api_search_players(q: str = ""):
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+
+    try:
+        data = eng.api_get("/people/search", params={"names": q})
+        people = data.get("people") or []
+    except Exception:
+        return []
+
+    results = []
+    for p in people[:10]:
+        results.append({
+            "id": p.get("id"),
+            "name": p.get("fullName"),
+        })
+
+    return results
+    
 @app.get("/", response_class=HTMLResponse)
 def home():
-    # --- Pull small previews (keep everything safe) ---
+    # ---- tiny previews (safe) ----
     try:
-        edge_preview = today_edge_board_data(limit=6)  # list of dicts (name, edge, model_p, implied, etc.)
+        edge_preview = today_edge_board_data(limit=6)  # expects dicts w/ name,pid,model_p,implied,edge
     except Exception:
         edge_preview = []
 
@@ -1067,15 +1088,13 @@ def home():
     except Exception:
         parks_preview = []
 
-    # optional: show today's games count
     day = today_yyyy_mm_dd()
     try:
-        games = get_today_games(day)
-        games_n = len(games)
+        games_n = len(get_today_games(day))
     except Exception:
         games_n = 0
 
-    # --- Render helpers ---
+    # ---- render helpers ----
     def fmt_edge_cell(r: dict) -> str:
         name = r.get("name", "")
         pid = r.get("pid")
@@ -1087,7 +1106,6 @@ def home():
         model_str = "n/a" if model_p is None else f"{model_p*100:.1f}%"
         imp_str = "n/a" if implied is None else f"{implied*100:.1f}%"
 
-        # badge color by edge
         if edge is None:
             badge = '<span class="badge text-bg-secondary">n/a</span>'
         elif edge >= 0.03:
@@ -1137,11 +1155,10 @@ def home():
 </div>
 """
 
-    # --- Build sections ---
     edge_html = (
         "".join(fmt_edge_cell(r) for r in edge_preview)
         if edge_preview
-        else "<div class='dark-muted'>Add hitters to your Watchlist → then Today Edge populates here.</div>"
+        else "<div class='dark-muted'>Add hitters to Watchlist → then Today Edge populates here.</div>"
     )
 
     teams_html = (
@@ -1160,7 +1177,7 @@ def home():
 <!-- HERO -->
 <div class="card-dark mb-4 p-4">
   <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-    <div>
+    <div style="max-width:720px;">
       <div class="display-6 fw-bold">MLB Betting Analytics</div>
       <div class="dark-muted mt-2">
         HR edges, hot offenses, favorable parks, and daily prop tools.
@@ -1173,34 +1190,43 @@ def home():
         <a class="btn btn-outline-light" href="/suggest/hitters">Auto-Suggest Hitters</a>
       </div>
     </div>
-<div class="mt-3">
-  <form class="row g-2 align-items-end" action="/today" method="get">
-    <div class="col-12 col-md-4">
-      <label class="form-label dark-muted small mb-0">Date</label>
-      <input class="form-control" name="date" value="{hs(day)}" placeholder="YYYY-MM-DD">
+
+    <div class="p-3" style="min-width:320px; max-width:420px;">
+      <div class="fw-semibold mb-2">Quick actions</div>
+
+      <!-- ONE DATE BOX -->
+      <form class="row g-2 align-items-end mb-2" action="/today" method="get">
+        <div class="col-7">
+          <label class="form-label dark-muted small mb-0">Date</label>
+          <input class="form-control" name="date" value="{hs(day)}" placeholder="YYYY-MM-DD">
+        </div>
+        <div class="col-5 d-grid">
+          <button class="btn btn-outline-light" type="submit">Games</button>
+        </div>
+        <div class="col-12 dark-muted small">{int(games_n)} games on {hs(day)}</div>
+      </form>
+
+      <!-- ONE SEARCH BOX -->
+      <form class="d-flex gap-2" action="/search" method="get">
+        <input
+          class="form-control"
+          name="q"
+          id="playerSearch"
+          placeholder="Search player…"
+          autocomplete="off"
+          list="playerSuggestions"
+        >
+        <datalist id="playerSuggestions"></datalist>
+        <button class="btn btn-primary" type="submit">Search</button>
+      </form>
+      <div class="dark-muted small mt-2">Type 2+ letters to see suggestions.</div>
     </div>
-    <div class="col-12 col-md-3 d-grid">
-      <button class="btn btn-outline-light" type="submit">Go to Games</button>
-    </div>
-    <div class="col-12 col-md-5 dark-muted small">
-      {int(games_n)} games on {hs(day)}
-    </div>
-  </form>
-</div>
-   
-<!-- SEARCH -->
-<div class="card-dark mb-4 p-3">
-  <form class="d-flex gap-2" action="/search" method="get">
-    <input class="form-control form-control-lg" name="q"
-           placeholder="Search a player (e.g., Aaron Judge)" autocomplete="off">
-    <button class="btn btn-primary btn-lg" type="submit">Search</button>
-  </form>
+  </div>
 </div>
 
 <!-- MAIN GRID -->
 <div class="row g-3">
 
-  <!-- Left: Today Edge preview -->
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1212,7 +1238,6 @@ def home():
     </div>
   </div>
 
-  <!-- Right: Hot teams -->
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1224,7 +1249,6 @@ def home():
     </div>
   </div>
 
-  <!-- Parks -->
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3 h-100">
       <div class="d-flex justify-content-between align-items-center mb-2">
@@ -1236,7 +1260,6 @@ def home():
     </div>
   </div>
 
-  <!-- Quick links -->
   <div class="col-12 col-lg-6">
     <div class="card-dark p-3 h-100">
       <div class="fw-semibold mb-2">Quick Tools</div>
@@ -1269,6 +1292,40 @@ def home():
   </div>
 
 </div>
+
+<script>
+(function() {{
+  const input = document.getElementById("playerSearch");
+  const list = document.getElementById("playerSuggestions");
+  if (!input || !list) return;
+
+  let t = null;
+
+  input.addEventListener("input", function() {{
+    const q = (input.value || "").trim();
+    if (q.length < 2) {{
+      list.innerHTML = "";
+      return;
+    }}
+
+    clearTimeout(t);
+    t = setTimeout(async () => {{
+      try {{
+        const res = await fetch(`/api/search-players?q=${{encodeURIComponent(q)}}`);
+        const data = await res.json();
+        list.innerHTML = "";
+        (data || []).slice(0, 10).forEach(p => {{
+          const opt = document.createElement("option");
+          opt.value = p.name || "";
+          list.appendChild(opt);
+        }});
+      }} catch (e) {{
+        // ignore
+      }}
+    }}, 200);
+  }});
+}})();
+</script>
 """
     return layout("MLB Analytics Dashboard", body)
 
