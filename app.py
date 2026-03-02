@@ -1000,7 +1000,7 @@ def layout(title: str, body: str) -> str:
   </div>
   <div class="offcanvas-body">
     <a href="/">Dashboard</a>
-    <a href="/leaderboard/hits?season=2025">Top Hitters (1876-Current)</a>
+    <a href="/leaderboard/hits?season=2025">Hit Leaders</a>
     <a href="/today-edge">Today Edge</a>
     <a href="/today">Today</a>
     <a href="/today-hitters">Today's Hitters</a>
@@ -1020,7 +1020,7 @@ def layout(title: str, body: str) -> str:
     <nav class="col-lg-2 d-none d-lg-block sidebar min-vh-100 p-4">
       <h4 class="fw-bold mb-4">MLB Analytics</h4>
       <a href="/">Dashboard</a>
-      <a href="/leaderboard/hits?season=2025">Top Hitters (1876-Current)</a>
+      <a href="/leaderboard/hits?season=2025">Hit Leaders</a>
       <a href="/today-edge">Today Edge</a>
       <a href="/today">Today</a>
       <a href="/today-hitters">Today's Hitters</a>
@@ -1087,7 +1087,7 @@ def home():
   </div>
 
   <div class="mt-4 d-flex gap-3 flex-wrap">
-    <a class="btn btn-danger btn-lg" href="/leaderboard/hits?season=2025">Top Hitters (1876-Current)</a>  
+    <a class="btn btn-danger btn-lg" href="/leaderboard/hits?season=2025">Hit Leaders</a>  
     <a class="btn btn-primary btn-lg" href="/today-edge">Today Edge Board</a>
     <a class="btn btn-warning btn-lg" href="/leaderboard/hr-props">HR Props Board</a>
     <a class="btn btn-danger btn-lg" href="/leaderboard/teams-hot">Hot Teams</a>
