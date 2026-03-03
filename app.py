@@ -2386,6 +2386,10 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
   <td class="text-center fw-semibold">{k_str}</td>
 </tr>
 """
+debug_line = " | ".join(
+    f"{p.get('name','?')} ({p.get('group','?')})"
+    for p in wl.get("players", [])
+) or "empty"
 
     body = f"""
 <div class="card-dark mb-3">
@@ -2411,6 +2415,9 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     </div>
   </form>
 </div>
+<div class="dark-muted small mt-2">
+  DEBUG watchlist: {hs(debug_line)}
+</div>
 
 <div class="card-dark">
   <div class="table-responsive">
@@ -2427,10 +2434,6 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
       </tbody>
     </table>
   </div>
-</div>
-
-<div class="muted small">
-  season {hs(p.get("season","-"))} - id {hs(p.get("id","-"))} - group {hs(p.get("group","-"))}
 </div>
 
 <script>
