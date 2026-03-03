@@ -2397,11 +2397,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
   <td class="text-center fw-semibold">{k_str}</td>
 </tr>
 """
-    debug_line = " | ".join(
-        f"{p.get('name','?')} ({p.get('group','?')})"
-        for p in wl.get("players", [])
-    ) or "empty"
-
+   
     body = f"""
 <div class="card-dark mb-3">
   <form class="row g-2 align-items-end" action="/today-ks" method="get">
@@ -2425,9 +2421,6 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
       Expected Ks = blended K/IP * projected IP. Add pitchers to watchlist (group=pitching).
     </div>
   </form>
-</div>
-<div class="dark-muted small mt-2">
-  DEBUG watchlist: {hs(debug_line)}
 </div>
 
 <div class="card-dark">
