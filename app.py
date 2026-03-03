@@ -465,7 +465,121 @@ def get_today_team_ids(day: str) -> List[int]:
         except Exception:
             pass
     return sorted(set(out))
+    
+# ----------------------------
+# Pitcher matchup + handedness helpers
+# ----------------------------
 
+def get_player_detail_cached(pid: int) -> Optional[dict]:
+    if not pid:
+        return None
+    k = f"player:{int(pid)}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+    try:
+        data = eng.api_get(f"/people/{int(pid)}") if hasattr(eng, "api_get") else mlb_get(f"/api/v1/people/{int(pid)}")
+        people = data.get("people") or []
+        p = people[0] if people else None
+        if p:
+            mem_set(k, p, ttl=60 * 60 * 12)  # 12h
+        return p
+    except Exception:
+        return None
+
+def pitcher_hand(pid: int) -> Optional[str]:
+    p = get_player_detail_cached(pid) or {}
+    ph = (p.get("pitchHand") or {}).get("code")
+    if ph in ("L", "R"):
+        return ph
+    return None
+
+def find_pitcher_today_matchup(pid: int, day: str) -> Optional[dict]:
+    """
+    If pid is listed as probablePitcher for a game on 'day',
+    returns {opp_team_id, opp_team_name, gameDate, venue_name}
+    """
+    try:
+        games = get_today_games(day)
+    except Exception:
+        return None
+
+    for g in games:
+        try:
+            home = (g.get("teams") or {}).get("home") or {}
+            away = (g.get("teams") or {}).get("away") or {}
+            home_team = home.get("team") or {}
+            away_team = away.get("team") or {}
+
+            pp_home = home.get("probablePitcher") or {}
+            pp_away = away.get("probablePitcher") or {}
+
+            venue = (g.get("venue") or {}).get("name") or "tbd"
+
+            if int(pp_home.get("id") or 0) == int(pid):
+                return {
+                    "opp_team_id": int(away_team.get("id") or 0),
+                    "opp_team_name": away_team.get("name") or "Away",
+                    "gameDate": g.get("gameDate") or "",
+                    "venue_name": venue,
+                }
+            if int(pp_away.get("id") or 0) == int(pid):
+                return {
+                    "opp_team_id": int(home_team.get("id") or 0),
+                    "opp_team_name": home_team.get("name") or "Home",
+                    "gameDate": g.get("gameDate") or "",
+                    "venue_name": venue,
+                }
+        except Exception:
+            continue
+
+    return None
+
+def team_kpct_vs_hand(team_id: int, season: int, hand: str) -> Optional[float]:
+    """
+    Returns opponent team K% (SO/PA) in regular season vs LHP or vs RHP.
+    Uses team hitting splits: sitCodes=vl,vr
+    """
+    if not team_id or hand not in ("L", "R"):
+        return None
+
+    sit = "vl" if hand == "L" else "vr"  # vs left / vs right
+    k = f"team_kpct:{team_id}:{season}:{sit}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    try:
+        data = mlb_get(
+            f"/api/v1/teams/{int(team_id)}/stats",
+            params={
+                "stats": "statSplits",
+                "group": "hitting",
+                "sitCodes": sit,
+                "season": int(season),
+                "gameType": "R",
+            },
+        )
+        stats = (data.get("stats") or [])
+        splits = (stats[0].get("splits") if stats else []) or []
+        if not splits:
+            return None
+
+        st = (splits[0].get("stat") or {})
+        so = st.get("strikeOuts")
+        pa = st.get("plateAppearances")
+
+        so_i = int(float(so)) if so is not None else None
+        pa_i = int(float(pa)) if pa is not None else None
+        if not so_i or not pa_i or pa_i <= 0:
+            return None
+
+        kpct = so_i / pa_i  # team K%
+        mem_set(k, kpct, ttl=60 * 60 * 6)  # 6h
+        return kpct
+    except Exception:
+        return None
+        
 # ----------------------------
 # Name cache + lineup extraction
 # ----------------------------
@@ -2425,6 +2539,26 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             k_ip_base = 0.70 * float(k_ip_recent) + 0.30 * float(k_ip_season)
 
         exp_k = k_ip_base * ip_use
+        # --- Handedness matchup adjustment ---
+        today = today_yyyy_mm_dd()
+        match = find_pitcher_today_matchup(pid, today)
+        hand = pitcher_hand(pid)
+
+        opp_kpct = None
+        adj_mult = 1.0
+        ctx = ""
+
+        if match and hand:
+            opp_kpct = team_kpct_vs_hand(match["opp_team_id"], season, hand)
+
+            LEAGUE_KPCT = 0.220  # baseline
+
+            if opp_kpct is not None:
+                adj_mult = opp_kpct / LEAGUE_KPCT
+                adj_mult = max(0.85, min(1.15, adj_mult))  # clamp
+                exp_k = exp_k * adj_mult
+
+            ctx = f"{match['opp_team_name']} vs {hand}HP @ {match.get('venue_name','tbd')}"
 
         # convenience stats
         k9_season = _k9_from_kip(float(k_ip_season))
@@ -2440,6 +2574,10 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             detail += f" | K/9 last{window} {k9_recent:.1f}"
         if last_k is not None and last_ip is not None:
             detail += f" | last: {last_k}K in {last_ip:.1f}IP"
+        if ctx:
+            detail += f" | {ctx}"
+        if opp_kpct is not None:
+            detail += f" | Opp K% vs {hand}HP {opp_kpct*100:.1f}% (x{adj_mult:.2f})"
 
         rows.append({
             "name": name,
