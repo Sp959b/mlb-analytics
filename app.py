@@ -2321,12 +2321,11 @@ def parks_board(window: int = 30):
     return layout("Park Leaderboard", body)
     
 @app.get("/today-ks", response_class=HTMLResponse)
-def today_ks_board(window: int = 14, ip_proj: float = 5.5):
+def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
     wl = load_watchlist()
     pitchers = [p for p in wl.get("players", []) if p.get("group") == "pitching"]
-    print("KS DEBUG watchlist players:", [(p.get("name"), p.get("group")) for p in wl.get("players", [])])
-    print("KS DEBUG pitchers filtered:", [(p.get("name"), p.get("group")) for p in pitchers])
 
+    # normalize params
     try:
         window = int(window)
     except Exception:
@@ -2334,11 +2333,49 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     if window not in (7, 14, 30):
         window = 14
 
+    # ip_proj=0 means AUTO
     try:
         ip_proj = float(ip_proj)
     except Exception:
-        ip_proj = 5.5
-    ip_proj = max(1.0, min(9.0, ip_proj))
+        ip_proj = 0.0
+
+    # optional line (for edge)
+    try:
+        k_line = float(k_line)
+    except Exception:
+        k_line = 0.0
+
+    def _to_float(x):
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    def _to_int(x):
+        try:
+            return int(float(x))
+        except Exception:
+            return None
+
+    def _k9_from_kip(k_ip: float) -> float:
+        return float(k_ip) * 9.0
+
+    def _auto_ip_proj_from_games(games: list[dict]) -> float:
+        """
+        Estimate projected IP from recent starts.
+        Uses last 5 games with inningsPitched, averages them, clamps to [3.0, 7.0].
+        """
+        if not games:
+            return 5.5
+        ips = []
+        for g in games[:5]:
+            ip = _to_float(g.get("inningsPitched"))
+            if ip is not None and ip > 0:
+                ips.append(ip)
+        if not ips:
+            return 5.5
+        avg_ip = sum(ips) / len(ips)
+        return max(3.0, min(7.0, avg_ip))
 
     rows = []
     for p in pitchers:
@@ -2350,19 +2387,20 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
         try:
             k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
         except Exception as e:
-            rows.append({"name": name, "k_exp": None, "detail": f"error season baseline: {type(e).__name__}"})
+            rows.append({"name": name, "pid": pid, "season": season, "exp_k": None, "edge": None, "detail": f"season baseline error: {type(e).__name__}"})
             continue
 
         if k_ip_season is None:
-            rows.append({"name": name, "k_exp": None, "detail": "missing season K/IP"})
+            rows.append({"name": name, "pid": pid, "season": season, "exp_k": None, "edge": None, "detail": "missing season K/IP"})
             continue
 
-        # recent form (optional blend)
+        # game logs (most recent first in your app)
         try:
             games = eng.get_player_game_log(pid, season, "pitching") or []
         except Exception:
             games = []
 
+        # recent form
         k_ip_recent = None
         if games:
             try:
@@ -2370,34 +2408,72 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
             except Exception:
                 k_ip_recent = None
 
+        # last start snapshot
+        last_k = None
+        last_ip = None
+        if games:
+            last_k = _to_int(games[0].get("strikeOuts"))
+            last_ip = _to_float(games[0].get("inningsPitched"))
+
+        # choose projected IP
+        ip_use = ip_proj if ip_proj and ip_proj > 0 else _auto_ip_proj_from_games(games)
+
+        # blend K/IP
         k_ip_base = float(k_ip_season)
         if k_ip_recent is not None:
-            # blend: emphasize recent a bit but keep stable
-            k_ip_base = 0.60 * float(k_ip_recent) + 0.40 * float(k_ip_season)
+            # tweak weights (more responsive than before)
+            k_ip_base = 0.70 * float(k_ip_recent) + 0.30 * float(k_ip_season)
 
-        # expected Ks
-        k_exp = k_ip_base * ip_proj
+        exp_k = k_ip_base * ip_use
 
-        detail = f"season K/IP {k_ip_season:.2f}"
-        if k_ip_recent is not None:
-            detail += f" | last{window} K/IP {k_ip_recent:.2f}"
-        detail += f" | IPproj {ip_proj:.1f}"
+        # convenience stats
+        k9_season = _k9_from_kip(float(k_ip_season))
+        k9_recent = _k9_from_kip(float(k_ip_recent)) if k_ip_recent is not None else None
 
-        rows.append({"name": name, "k_exp": k_exp, "detail": detail})
+        # edge vs line (optional)
+        edge = None
+        if k_line and k_line > 0:
+            edge = exp_k - k_line
 
-    rows.sort(key=lambda r: (r["k_exp"] is None, -(r["k_exp"] or -1e9)))
+        detail = f"IPproj {ip_use:.1f} | K/9 season {k9_season:.1f}"
+        if k9_recent is not None:
+            detail += f" | K/9 last{window} {k9_recent:.1f}"
+        if last_k is not None and last_ip is not None:
+            detail += f" | last: {last_k}K in {last_ip:.1f}IP"
+
+        rows.append({
+            "name": name,
+            "pid": pid,
+            "season": season,
+            "exp_k": exp_k,
+            "edge": edge,
+            "detail": detail,
+        })
+
+    # sort: highest expected Ks first; if line exists, you may want by edge instead
+    if k_line and k_line > 0:
+        rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or -1e9), -(r["exp_k"] or -1e9)))
+    else:
+        rows.sort(key=lambda r: (r["exp_k"] is None, -(r["exp_k"] or -1e9)))
 
     trs = ""
     for r in rows:
-        k_str = "n/a" if r["k_exp"] is None else f"{r['k_exp']:.1f}"
+        exp_str = "n/a" if r["exp_k"] is None else f"{r['exp_k']:.1f}"
+        edge_str = ""
+        if k_line and k_line > 0:
+            edge_str = "n/a" if r["edge"] is None else f"{r['edge']:+.1f}"
         trs += f"""
 <tr class="ks-row" data-name="{lower_attr(r['name'])}">
   <td class="fw-semibold">{hs(r['name'])}</td>
   <td class="text-secondary small">{hs(r['detail'])}</td>
-  <td class="text-center fw-semibold">{k_str}</td>
+  <td class="text-center fw-semibold">{hs(exp_str)}</td>
+  <td class="text-center fw-semibold">{hs(edge_str) if edge_str else ""}</td>
 </tr>
 """
-   
+
+    # show / hide Edge column
+    edge_th = "<th class='text-center'>Edge</th>" if (k_line and k_line > 0) else "<th class='text-center'></th>"
+
     body = f"""
 <div class="card-dark mb-3">
   <form class="row g-2 align-items-end" action="/today-ks" method="get">
@@ -2409,16 +2485,27 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
         <option value="30" {"selected" if window==30 else ""}>30</option>
       </select>
     </div>
+
     <div class="col-6 col-md-2">
       <label class="form-label dark-muted small mb-0">Projected IP</label>
-      <input class="form-control" name="ip_proj" value="{hs(ip_proj)}">
+      <input class="form-control" name="ip_proj" value="{hs(ip_proj)}" placeholder="0 = auto">
+      <div class="dark-muted small">Use 0 for auto IP.</div>
     </div>
-    <div class="col-12 col-md-4">
+
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">K Line</label>
+      <input class="form-control" name="k_line" value="{hs(k_line)}" placeholder="e.g. 6.5">
+      <div class="dark-muted small">Optional for edge.</div>
+    </div>
+
+    <div class="col-12 col-md-3">
       <label class="form-label dark-muted small mb-0">Search</label>
       <input id="ksSearch" class="form-control" placeholder="Type a pitcher name...">
     </div>
-    <div class="col-12 col-md-4 dark-muted small">
-      Expected Ks = blended K/IP * projected IP. Add pitchers to watchlist (group=pitching).
+
+    <div class="col-12 col-md-3 dark-muted small">
+      Exp K = blended K/IP × IPproj.  
+      Blend = 70% last{window} + 30% season.
     </div>
   </form>
 </div>
@@ -2431,10 +2518,11 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
           <th>Pitcher</th>
           <th>Notes</th>
           <th class="text-center">Exp K</th>
+          {edge_th}
         </tr>
       </thead>
       <tbody>
-        {trs if trs else '<tr><td colspan="3" class="dark-muted">No pitchers in watchlist.</td></tr>'}
+        {trs if trs else '<tr><td colspan="4" class="dark-muted">No pitchers in watchlist.</td></tr>'}
       </tbody>
     </table>
   </div>
