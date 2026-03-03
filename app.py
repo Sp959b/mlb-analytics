@@ -2313,6 +2313,8 @@ def parks_board(window: int = 30):
 def today_ks_board(window: int = 14, ip_proj: float = 5.5):
     wl = load_watchlist()
     pitchers = [p for p in wl.get("players", []) if p.get("group") == "pitching"]
+    print("KS DEBUG watchlist players:", [(p.get("name"), p.get("group")) for p in wl.get("players", [])])
+    print("KS DEBUG pitchers filtered:", [(p.get("name"), p.get("group")) for p in pitchers])
 
     try:
         window = int(window)
@@ -2425,6 +2427,10 @@ def today_ks_board(window: int = 14, ip_proj: float = 5.5):
       </tbody>
     </table>
   </div>
+</div>
+
+<div class="muted small">
+  season {hs(p.get("season","-"))} - id {hs(p.get("id","-"))} - group {hs(p.get("group","-"))}
 </div>
 
 <script>
