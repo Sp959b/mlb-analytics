@@ -1396,6 +1396,12 @@ def player_dashboard(pid: int, season: int = datetime.now().year):
   <input type="hidden" name="season" value="{season}">
   <button class="btn btn-primary" type="submit">+ Watchlist</button>
 </form>
+<form action="/watchlist/add-pitcher" method="post">
+  <input type="hidden" name="pid" value="{pid}">
+  <input type="hidden" name="name" value="{hs(name)}">
+  <input type="hidden" name="season" value="{season}">
+  <button class="btn btn-outline-info" type="submit">+ Watch (Pitcher)</button>
+</form>
 """
     )
 
@@ -1538,7 +1544,12 @@ def watchlist():
 {rows if rows else '<div class="p-3 soft-card muted">Watchlist is empty.</div>'}
 """
     return layout("Watchlist", body)
-
+    
+@app.post("/watchlist/add-pitcher")
+def watchlist_add_pitcher(pid: int = Form(...), name: str = Form(...), season: int = Form(...)):
+    add_watch(pid=int(pid), name=str(name).strip() or f"ID {pid}", season=int(season), group="pitching")
+    return RedirectResponse("/watchlist", status_code=303)
+    
 @app.post("/watchlist/remove")
 def watchlist_remove(index: int = Form(...)):
     remove_watch(int(index))
