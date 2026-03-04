@@ -2390,7 +2390,7 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
 
         # Pull game logs (most recent first in your app)
         try:
-            games = eng.get_player_game_log(pid, season, "hitting") or []
+            games = eng.get_player_game_log(pid, season, "batting") or []
         except Exception:
             games = []
 
