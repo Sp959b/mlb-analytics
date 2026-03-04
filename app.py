@@ -2350,6 +2350,194 @@ def heat_leaderboard(window: int = 7):
 """
     return layout("Heat Board", body)
 
+@app.get("/today-hits", response_class=HTMLResponse)
+def today_hits_board(window: int = 14, h_line: float = 0.0):
+    wl = load_watchlist()
+    hitters = [p for p in wl.get("players", []) if p.get("group") != "pitching"]
+
+    # normalize params
+    try:
+        window = int(window)
+    except Exception:
+        window = 14
+    if window not in (7, 14, 30):
+        window = 14
+
+    try:
+        h_line = float(h_line)
+    except Exception:
+        h_line = 0.0
+
+    def _to_float(x):
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    def _to_int(x):
+        try:
+            return int(float(x))
+        except Exception:
+            return None
+
+    rows = []
+    season_default = datetime.now().year
+
+    for p in hitters:
+        pid = int(p.get("id", 0) or 0)
+        name = p.get("name") or f"ID {pid}"
+        season = int(p.get("season") or season_default)
+
+        # Pull game logs (most recent first in your app)
+        try:
+            games = eng.get_player_game_log(pid, season, "hitting") or []
+        except Exception:
+            games = []
+
+        # Compute season-ish baseline from logs if we have them
+        # (fallback safe: avoid hard dependency on a season summary function)
+        hpg_season = None
+        gcount = 0
+        hsum = 0
+        for g in games:
+            h = _to_int(g.get("hits"))
+            if h is None:
+                continue
+            hsum += h
+            gcount += 1
+        if gcount > 0:
+            hpg_season = hsum / gcount
+
+        # Recent window average hits/game
+        hpg_recent = None
+        if games:
+            n = min(len(games), window)
+            hsum_r = 0
+            gcount_r = 0
+            for g in games[:n]:
+                h = _to_int(g.get("hits"))
+                if h is None:
+                    continue
+                hsum_r += h
+                gcount_r += 1
+            if gcount_r > 0:
+                hpg_recent = hsum_r / gcount_r
+
+        # Blend
+        if hpg_season is None and hpg_recent is None:
+            rows.append({"name": name, "exp_h": None, "edge": None, "detail": "no hitting logs"})
+            continue
+
+        base = (hpg_season if hpg_season is not None else hpg_recent)
+        if hpg_recent is not None and hpg_season is not None:
+            base = 0.70 * hpg_recent + 0.30 * hpg_season
+
+        exp_h = base  # expected hits per game
+
+        # line edge
+        edge = None
+        if h_line and h_line > 0:
+            edge = exp_h - h_line
+
+        # last game snapshot
+        last_h = None
+        if games:
+            last_h = _to_int(games[0].get("hits"))
+
+        detail = f"H/G last{window} {hpg_recent:.2f}" if hpg_recent is not None else ""
+        if hpg_season is not None:
+            detail += (f" | H/G season {hpg_season:.2f}" if detail else f"H/G season {hpg_season:.2f}")
+        if last_h is not None:
+            detail += f" | last: {last_h}H"
+
+        rows.append({"name": name, "exp_h": exp_h, "edge": edge, "detail": detail})
+
+    # sort
+    if h_line and h_line > 0:
+        rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or -1e9), -(r["exp_h"] or -1e9)))
+    else:
+        rows.sort(key=lambda r: (r["exp_h"] is None, -(r["exp_h"] or -1e9)))
+
+    trs = ""
+    for r in rows:
+        exp_str = "n/a" if r["exp_h"] is None else f"{r['exp_h']:.2f}"
+        edge_str = ""
+        if h_line and h_line > 0:
+            edge_str = "n/a" if r["edge"] is None else f"{r['edge']:+.2f}"
+        trs += f"""
+<tr class="hits-row" data-name="{lower_attr(r['name'])}">
+  <td class="fw-semibold">{hs(r['name'])}</td>
+  <td class="text-secondary small">{hs(r['detail'])}</td>
+  <td class="text-center fw-semibold">{hs(exp_str)}</td>
+  <td class="text-center fw-semibold">{hs(edge_str) if edge_str else ""}</td>
+</tr>
+"""
+
+    edge_th = "<th class='text-center'>Edge</th>" if (h_line and h_line > 0) else "<th class='text-center'></th>"
+
+    body = f"""
+<div class="card-dark mb-3">
+  <form class="row g-2 align-items-end" action="/today-hits" method="get">
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Window</label>
+      <select class="form-select" name="window">
+        <option value="7" {"selected" if window==7 else ""}>7</option>
+        <option value="14" {"selected" if window==14 else ""}>14</option>
+        <option value="30" {"selected" if window==30 else ""}>30</option>
+      </select>
+    </div>
+
+    <div class="col-6 col-md-2">
+      <label class="form-label dark-muted small mb-0">Hit Line</label>
+      <input class="form-control" name="h_line" value="{hs(h_line)}" placeholder="e.g. 1.5">
+      <div class="dark-muted small">Optional for edge.</div>
+    </div>
+
+    <div class="col-12 col-md-4">
+      <label class="form-label dark-muted small mb-0">Search</label>
+      <input id="hitsSearch" class="form-control" placeholder="Type a hitter name...">
+    </div>
+
+    <div class="col-12 col-md-4 dark-muted small">
+      Exp H = blended hits/game. Blend = 70% last{window} + 30% season (from logs).
+    </div>
+  </form>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Hitter</th>
+          <th>Notes</th>
+          <th class="text-center">Exp H</th>
+          {edge_th}
+        </tr>
+      </thead>
+      <tbody>
+        {trs if trs else '<tr><td colspan="4" class="dark-muted">No hitters in watchlist.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {{
+  const input = document.getElementById("hitsSearch");
+  if (!input) return;
+  input.addEventListener("keyup", function() {{
+    const q = (input.value || "").toLowerCase();
+    document.querySelectorAll(".hits-row").forEach(function(row) {{
+      const name = row.getAttribute("data-name") || "";
+      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
+    }});
+  }});
+}});
+</script>
+"""
+    return layout("Today Hits Board", body)
+    
 @app.get("/leaderboard/parks", response_class=HTMLResponse)
 def parks_board(window: int = 30):
     # normalize window defensively (handles querystring weirdness)
