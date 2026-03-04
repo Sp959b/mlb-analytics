@@ -2500,6 +2500,11 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
         # season baseline
         try:
             k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
+            
+            if k_ip_season is None:
+                # fallback to previous season
+            k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season - 1)
+            
         except Exception as e:
             rows.append({"name": name, "pid": pid, "season": season, "exp_k": None, "edge": None, "detail": f"season baseline error: {type(e).__name__}"})
             continue
