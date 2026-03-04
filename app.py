@@ -2390,9 +2390,24 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
 
         # Pull game logs (most recent first in your app)
         try:
-            games = eng.get_player_game_log(pid, season, "batting") or []
+            games = eng.get_player_game_log(pid, season, "hitting") or []
         except Exception:
             games = []
+        if not games and season_used > 1900:
+            try:
+                games = eng.get_player_game_log(pid, season_used - 1, "hitting") or []
+                if games:
+                    season_used = season_used - 1
+            except Exception:
+                pass
+        if not games:
+                rows.append({
+                    "name": name,
+                    "exp_h": None,
+                    "edge": None,
+                    "detail": f"no hitting logs (season {season_used})"
+                })
+                continue
 
         # Compute season-ish baseline from logs if we have them
         # (fallback safe: avoid hard dependency on a season summary function)
