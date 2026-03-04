@@ -2587,6 +2587,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             "edge": edge,
             "detail": detail,
         })
+        print("K MATCH DEBUG:", name, hand, match, opp_kpct)
 
     # sort: highest expected Ks first; if line exists, you may want by edge instead
     if k_line and k_line > 0:
