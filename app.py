@@ -2439,7 +2439,9 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
     wl = load_watchlist()
     pitchers = [p for p in wl.get("players", []) if p.get("group") == "pitching"]
 
-    # normalize params
+    # -------------------------
+    # Normalize params
+    # -------------------------
     try:
         window = int(window)
     except Exception:
@@ -2481,7 +2483,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
         """
         if not games:
             return 5.5
-        ips = []
+        ips: list[float] = []
         for g in games[:5]:
             ip = _to_float(g.get("inningsPitched"))
             if ip is not None and ip > 0:
@@ -2491,33 +2493,53 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
         avg_ip = sum(ips) / len(ips)
         return max(3.0, min(7.0, avg_ip))
 
-    rows = []
+    rows: list[dict] = []
+
+    # -------------------------
+    # Build rows
+    # -------------------------
     for p in pitchers:
         pid = int(p.get("id", 0) or 0)
         name = p.get("name") or f"ID {pid}"
         season = int(p.get("season") or datetime.now().year)
 
-        # season baseline
+        # ---- season baseline (with fallback) ----
         try:
-    k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
+            k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season)
 
-    if k_ip_season is None:
+            if k_ip_season is None:
+                # fallback to previous season
+                k_ip_season, ip_season, k_season = eng.season_k_per_ip_from_season_stats(pid, season - 1)
 
         except Exception as e:
-            rows.append({"name": name, "pid": pid, "season": season, "exp_k": None, "edge": None, "detail": f"season baseline error: {type(e).__name__}"})
-            continue
-         
-        if k_ip_season is None:
-            rows.append({"name": name, "pid": pid, "season": season, "exp_k": None, "edge": None, "detail": "missing season K/IP"})
+            rows.append({
+                "name": name,
+                "pid": pid,
+                "season": season,
+                "exp_k": None,
+                "edge": None,
+                "detail": f"season baseline error: {type(e).__name__}",
+            })
             continue
 
-        # game logs (most recent first in your app)
+        if k_ip_season is None:
+            rows.append({
+                "name": name,
+                "pid": pid,
+                "season": season,
+                "exp_k": None,
+                "edge": None,
+                "detail": "missing season K/IP (and prev season fallback missing too)",
+            })
+            continue
+
+        # ---- game logs (most recent first in your app) ----
         try:
             games = eng.get_player_game_log(pid, season, "pitching") or []
         except Exception:
             games = []
 
-        # recent form
+        # ---- recent form ----
         k_ip_recent = None
         if games:
             try:
@@ -2525,24 +2547,26 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             except Exception:
                 k_ip_recent = None
 
-        # last start snapshot
+        # ---- last start snapshot ----
         last_k = None
         last_ip = None
         if games:
             last_k = _to_int(games[0].get("strikeOuts"))
             last_ip = _to_float(games[0].get("inningsPitched"))
 
-        # choose projected IP
-        ip_use = ip_proj if ip_proj and ip_proj > 0 else _auto_ip_proj_from_games(games)
+        # ---- choose projected IP ----
+        ip_use = ip_proj if (ip_proj and ip_proj > 0) else _auto_ip_proj_from_games(games)
 
-        # blend K/IP
+        # ---- blend K/IP ----
         k_ip_base = float(k_ip_season)
         if k_ip_recent is not None:
-            # tweak weights (more responsive than before)
             k_ip_base = 0.70 * float(k_ip_recent) + 0.30 * float(k_ip_season)
 
         exp_k = k_ip_base * ip_use
-        # --- Handedness matchup adjustment ---
+
+        # -------------------------
+        # Handedness matchup adjustment
+        # -------------------------
         today = today_yyyy_mm_dd()
         match = find_pitcher_today_matchup(pid, today)
         hand = pitcher_hand(pid)
@@ -2563,11 +2587,11 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
 
             ctx = f"{match['opp_team_name']} vs {hand}HP @ {match.get('venue_name','tbd')}"
 
-        # convenience stats
+        # ---- convenience stats ----
         k9_season = _k9_from_kip(float(k_ip_season))
-        k9_recent = _k9_from_kip(float(k_ip_recent)) if k_ip_recent is not None else None
+        k9_recent = _k9_from_kip(float(k_ip_recent)) if (k_ip_recent is not None) else None
 
-        # edge vs line (optional)
+        # ---- edge vs line (optional) ----
         edge = None
         if k_line and k_line > 0:
             edge = exp_k - k_line
@@ -2579,7 +2603,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             detail += f" | last: {last_k}K in {last_ip:.1f}IP"
         if ctx:
             detail += f" | {ctx}"
-        if opp_kpct is not None:
+        if opp_kpct is not None and hand:
             detail += f" | Opp K% vs {hand}HP {opp_kpct*100:.1f}% (x{adj_mult:.2f})"
 
         rows.append({
@@ -2590,20 +2614,29 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
             "edge": edge,
             "detail": detail,
         })
-        print("K MATCH DEBUG:", name, hand, match, opp_kpct)
 
-    # sort: highest expected Ks first; if line exists, you may want by edge instead
+        # optional debug (safe)
+        # print("K MATCH DEBUG:", name, hand, match, opp_kpct)
+
+    # -------------------------
+    # Sort
+    # -------------------------
     if k_line and k_line > 0:
         rows.sort(key=lambda r: (r["edge"] is None, -(r["edge"] or -1e9), -(r["exp_k"] or -1e9)))
     else:
         rows.sort(key=lambda r: (r["exp_k"] is None, -(r["exp_k"] or -1e9)))
 
+    # -------------------------
+    # Render table rows
+    # -------------------------
     trs = ""
     for r in rows:
         exp_str = "n/a" if r["exp_k"] is None else f"{r['exp_k']:.1f}"
+
         edge_str = ""
         if k_line and k_line > 0:
             edge_str = "n/a" if r["edge"] is None else f"{r['edge']:+.1f}"
+
         trs += f"""
 <tr class="ks-row" data-name="{lower_attr(r['name'])}">
   <td class="fw-semibold">{hs(r['name'])}</td>
@@ -2613,8 +2646,8 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
 </tr>
 """
 
-    # show / hide Edge column
     edge_th = "<th class='text-center'>Edge</th>" if (k_line and k_line > 0) else "<th class='text-center'></th>"
+    colspan = "4" if (k_line and k_line > 0) else "4"  # keep 4 because we always render the last column cell
 
     body = f"""
 <div class="card-dark mb-3">
@@ -2646,7 +2679,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
     </div>
 
     <div class="col-12 col-md-3 dark-muted small">
-      Exp K = blended K/IP × IPproj.  
+      Exp K = blended K/IP × IPproj.<br>
       Blend = 70% last{window} + 30% season.
     </div>
   </form>
@@ -2664,7 +2697,7 @@ def today_ks_board(window: int = 14, ip_proj: float = 0.0, k_line: float = 0.0):
         </tr>
       </thead>
       <tbody>
-        {trs if trs else '<tr><td colspan="4" class="dark-muted">No pitchers in watchlist.</td></tr>'}
+        {trs if trs else f'<tr><td colspan="{colspan}" class="dark-muted">No pitchers in watchlist.</td></tr>'}
       </tbody>
     </table>
   </div>
@@ -2677,7 +2710,7 @@ document.addEventListener("DOMContentLoaded", function() {{
   input.addEventListener("keyup", function() {{
     const q = (input.value || "").toLowerCase();
     document.querySelectorAll(".ks-row").forEach(function(row) {{
-      const name = row.getAttribute("data-name") || "";
+      const name = (row.getAttribute("data-name") || "");
       row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
     }});
   }});
@@ -2685,125 +2718,7 @@ document.addEventListener("DOMContentLoaded", function() {{
 </script>
 """
     return layout("Today Pitcher K Board", body)
-    
-@app.get("/today-hits", response_class=HTMLResponse)
-def today_hits_board(ab_proj: float = 3.8):
-    wl = load_watchlist()
-    hitters = [p for p in wl.get("players", []) if p.get("group") == "hitting"]
-    today = today_yyyy_mm_dd()
-    default_season = datetime.now().year
 
-    rows = []
-    for p in hitters:
-        pid = int(p["id"])
-        name = p.get("name") or f"ID {pid}"
-        season = int(p.get("season") or default_season)
-
-        # Get season hitting stats (you already use get_player_stats elsewhere)
-        try:
-            st = eng.get_player_stats(pid, "season", "hitting", season=season) or {}
-        except Exception:
-            st = {}
-
-        # Estimate p_hit_per_ab from season hits/AB
-        ab = _to_int(st.get("atBats"))
-        hits = _to_int(st.get("hits"))
-
-        if not ab or ab <= 0 or hits is None:
-            rows.append({"name": name, "pid": pid, "p": None, "detail": "missing hits/AB"})
-            continue
-
-        p_hit_ab = float(hits) / float(ab)
-        p_game = model_hit_game_prob(p_hit_ab, ab_proj=ab_proj)
-
-        # Optional: show matchup context if your engine provides it
-        ctx_str = ""
-        if hasattr(eng, "hr_props_today_context"):
-            try:
-                ctx = eng.hr_props_today_context(pid, season, today)
-            except Exception:
-                ctx = None
-            if ctx:
-                ctx_str = f"{ctx.get('sp_name','tbd')} / {ctx.get('venue_name','tbd')}"
-            else:
-                ctx_str = "tbd"
-        else:
-            ctx_str = "tbd"
-
-        rows.append({
-            "name": name,
-            "pid": pid,
-            "p": p_game,
-            "detail": f"season H/AB {p_hit_ab:.3f} | ABproj {ab_proj:.1f} | {ctx_str}",
-        })
-
-    # Sort best hit prob first, None at bottom
-    rows.sort(key=lambda r: (r["p"] is None, -(r["p"] or -1e9)))
-
-    trs = ""
-    for r in rows:
-        trs += f"""
-<tr class="hit-row" data-name="{hs(r['name']).lower()}">
-  <td class="fw-semibold">{hs(r['name'])}</td>
-  <td class="text-secondary small">{hs(r['detail'])}</td>
-  <td class="text-center fw-semibold">{hs(fmt_pct2(r['p']))}</td>
-</tr>
-"""
-
-    body = f"""
-<div class="card-dark mb-3">
-  <div class="row g-2 align-items-end">
-    <div class="col-12 col-md-4">
-      <label class="form-label dark-muted small mb-0">Search</label>
-      <input id="hitSearch" class="form-control" placeholder="Type a player name...">
-    </div>
-
-    <div class="col-12 col-md-3">
-      <label class="form-label dark-muted small mb-0">Projected AB</label>
-      <form action="/today-hits" method="get" class="d-flex gap-2">
-        <input class="form-control" name="ab_proj" value="{hs(ab_proj)}">
-        <button class="btn btn-primary" type="submit">Apply</button>
-      </form>
-    </div>
-
-    <div class="col-12 col-md-5 dark-muted small">
-      Model = 1 - (1 - H/AB)^AB. Uses season H/AB as baseline.
-    </div>
-  </div>
-</div>
-
-<div class="card-dark">
-  <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
-      <thead>
-        <tr>
-          <th>Player</th>
-          <th>Notes</th>
-          <th class="text-center">Hit%</th>
-        </tr>
-      </thead>
-      <tbody>
-        {trs if trs else '<tr><td colspan="3" class="dark-muted">No hitters in watchlist.</td></tr>'}
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<script>
-document.addEventListener("DOMContentLoaded", function() {{
-  const input = document.getElementById("hitSearch");
-  if (!input) return;
-  input.addEventListener("keyup", function() {{
-    const q = (input.value || "").toLowerCase();
-    document.querySelectorAll(".hit-row").forEach(function(row) {{
-      const name = row.getAttribute("data-name") || "";
-      row.style.display = (name.indexOf(q) >= 0) ? "" : "none";
-    }});
-  }});
-}});
-</script>
-"""
-    return layout("Today Hit Board", body)
 @app.get("/suggest/hitters", response_class=HTMLResponse)
 def suggest_hitters(date: str = "", per_team: int = 3, min_pa: int = 50):
     day = _safe_date_yyyy_mm_dd(date)
