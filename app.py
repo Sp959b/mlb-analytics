@@ -62,24 +62,41 @@ VENUE_COORD_FALLBACK: dict[int, tuple[float, float]] = {
 # In-memory TTL cache
 # ----------------------------
 _MEM: Dict[str, Tuple[float, Any]] = {}  # key -> (expires_ts, data)
+from collections import OrderedDict
+
+_MEM: "OrderedDict[str, Tuple[float, Any]]" = OrderedDict()
+_MEM_MAX = 120
+
+def mem_prune() -> None:
+    now = time.time()
+
+    # remove expired
+    expired = [k for k, (exp, _) in _MEM.items() if now > exp]
+    for k in expired:
+        _MEM.pop(k, None)
+
+    # remove oldest if still too big
+    while len(_MEM) > _MEM_MAX:
+        _MEM.popitem(last=False)
 
 def mem_get(key: str) -> Any:
     hit = _MEM.get(key)
     if not hit:
         return None
+
     exp, data = hit
     if time.time() > exp:
         _MEM.pop(key, None)
         return None
+
+    # mark as recently used
+    _MEM.move_to_end(key)
     return data
 
 def mem_set(key: str, data: Any, ttl: int) -> None:
     _MEM[key] = (time.time() + int(ttl), data)
-
-def mem_bust(prefix: str) -> None:
-    for k in list(_MEM.keys()):
-        if k.startswith(prefix):
-            _MEM.pop(k, None)
+    _MEM.move_to_end(key)
+    mem_prune()
 
 # ----------------------------
 # Requests session (retries/backoff)
@@ -416,7 +433,7 @@ def schedule_range(start: str, end: str, hydrate: str = "") -> dict:
     if hydrate:
         params["hydrate"] = hydrate
     data = mlb_get("/api/v1/schedule", params=params)
-    mem_set(k, data, ttl=60 * 60 * 6)
+    mem_set(k, data, ttl=60 * 10)
     return data
 
 def get_feed_live_cached(game_pk: int) -> Optional[dict]:
@@ -433,20 +450,14 @@ def get_feed_live_cached(game_pk: int) -> Optional[dict]:
 
 def get_boxscore_cached(game_pk: int) -> Optional[dict]:
     p = GAME_CACHE_DIR / f"box_{int(game_pk)}.json"
-    k = f"box:{int(game_pk)}"
-    cached = mem_get(k)
-    if cached is not None:
-        return cached
 
     data = cache_read(p)
     if data:
-        mem_set(k, data, ttl=120)
         return data
 
     try:
         data = mlb_get(f"/api/v1/game/{int(game_pk)}/boxscore")
         cache_write(p, data)
-        mem_set(k, data, ttl=120)
         return data
     except Exception:
         return None
@@ -1197,10 +1208,7 @@ def home():
     except Exception:
         hot_teams_preview = []
 
-    try:
-        parks_preview = park_leaderboard(window_days=14)[:6]
-    except Exception:
-        parks_preview = []
+    
 
     day = today_yyyy_mm_dd()
     try:
@@ -1965,7 +1973,6 @@ def today_games(date: str = ""):
 {cards if cards else '<div class="card-dark dark-muted">No games found for this date.</div>'}
 """
     page = layout("Today Games", body)
-    mem_set(k, page, ttl=45)
     return HTMLResponse(page)
 
 @app.get("/today-hitters", response_class=HTMLResponse)
@@ -2103,7 +2110,6 @@ document.addEventListener("DOMContentLoaded", function() {{
 </script>
 """
     page = layout("Today's Hitters", body)
-    mem_set(k, page, ttl=30)
     return HTMLResponse(page)
     
 @app.get("/leaderboard/hr-props", response_class=HTMLResponse)
@@ -2388,11 +2394,12 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
         name = p.get("name") or f"ID {pid}"
         season = int(p.get("season") or season_default)
 
-        # Pull game logs (most recent first in your app)
+        season_used = season
         try:
-            games = eng.get_player_game_log(pid, season, "hitting") or []
+            games = eng.get_player_game_log(pid, season_used, "hitting") or []
         except Exception:
             games = []
+
         if not games and season_used > 1900:
             try:
                 games = eng.get_player_game_log(pid, season_used - 1, "hitting") or []
@@ -2400,6 +2407,7 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
                     season_used = season_used - 1
             except Exception:
                 pass
+        
         if not games:
                 rows.append({
                     "name": name,
