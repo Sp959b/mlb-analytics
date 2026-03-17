@@ -2398,7 +2398,7 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
         name = p.get("name") or f"ID {pid}"
         season = int(p.get("season") or season_default)
 
-                season_used = season
+        season_used = season
 
         try:
             games = eng.get_player_game_log(pid, season_used, "hitting") or []
