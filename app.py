@@ -1222,9 +1222,13 @@ def home():
         edge_preview = []
 
     try:
-        hot_teams_preview = hot_teams(window_days=7)[:6]
+        hot_teams_preview = []
     except Exception:
         hot_teams_preview = []
+    try:
+        parks_preview = []
+    except Exception:
+        parks_preview = []
 
     
 
@@ -1883,11 +1887,6 @@ def today_games(date: str = ""):
     day = _safe_date_yyyy_mm_dd(date)
     year = int(day.split("-")[0])
 
-    # cache schedule for today page using mem
-    k = f"page:today:{day}"
-    cached = mem_get(k)
-    if cached is not None:
-        return HTMLResponse(cached)
 
     data = mlb_get("/api/v1/schedule", params={"sportId": 1, "date": day, "hydrate": "team,venue,probablePitcher"})
     dates = data.get("dates") or []
@@ -1997,11 +1996,6 @@ def today_games(date: str = ""):
 def today_hitters(date: str = ""):
     day = (date or "").strip() or today_yyyy_mm_dd()
     season = int(day.split("-")[0])
-
-    k = f"page:today_hitters:{day}"
-    cached = mem_get(k)
-    if cached is not None:
-        return HTMLResponse(cached)
 
     games = get_today_games(day)
     rows_html = ""
@@ -2412,7 +2406,8 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
         name = p.get("name") or f"ID {pid}"
         season = int(p.get("season") or season_default)
 
-        season_used = season
+                season_used = season
+
         try:
             games = eng.get_player_game_log(pid, season_used, "hitting") or []
         except Exception:
@@ -2425,15 +2420,15 @@ def today_hits_board(window: int = 14, h_line: float = 0.0):
                     season_used = season_used - 1
             except Exception:
                 pass
-        
+
         if not games:
-                rows.append({
-                    "name": name,
-                    "exp_h": None,
-                    "edge": None,
-                    "detail": f"no hitting logs (season {season_used})"
-                })
-                continue
+            rows.append({
+                "name": name,
+                "exp_h": None,
+                "edge": None,
+                "detail": f"no hitting logs (season {season_used})"
+            })
+            continue
 
         # Compute season-ish baseline from logs if we have them
         # (fallback safe: avoid hard dependency on a season summary function)
