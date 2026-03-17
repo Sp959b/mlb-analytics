@@ -1221,16 +1221,8 @@ def home():
     except Exception:
         edge_preview = []
 
-    try:
-        hot_teams_preview = []
-    except Exception:
-        hot_teams_preview = []
-    try:
-        parks_preview = []
-    except Exception:
-        parks_preview = []
-
-    
+    hot_teams_preview = []
+    parks_preview = []
 
     day = today_yyyy_mm_dd()
     try:
