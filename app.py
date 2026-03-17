@@ -18,6 +18,7 @@ from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 import mlb_engine as eng  # your engine module
+from collections import OrderedDict
 
 # ----------------------------
 # HTML escaping helpers
