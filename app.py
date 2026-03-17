@@ -443,10 +443,14 @@ def schedule_range(start: str, end: str, hydrate: str = "") -> dict:
     cached = mem_get(k)
     if cached is not None:
         return cached
+
     params = {"sportId": 1, "startDate": start, "endDate": end}
     if hydrate:
         params["hydrate"] = hydrate
+
     data = mlb_get("/api/v1/schedule", params=params)
+
+    # shorter TTL because these objects can get large
     mem_set(k, data, ttl=60 * 10)
     return data
 
