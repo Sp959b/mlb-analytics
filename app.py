@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 from __future__ import annotations
 
 import json
@@ -17,8 +16,13 @@ from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-import mlb_engine as eng  # your engine module
+import mlb_engine as eng
 from collections import OrderedDict
+
+DATA_DIR = Path("/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+WATCHLIST_PATH = DATA_DIR / "watchlist.json"
 
 # ----------------------------
 # HTML escaping helpers
@@ -40,13 +44,15 @@ def lower_attr(x: Any) -> str:
 # ----------------------------
 LA_TZ = ZoneInfo("America/Los_Angeles")
 
-# Render note: /tmp is writable but not persistent across deploys/restarts.
-WATCHLIST_PATH = Path("/tmp/watchlist.json")
-ODDS_PATH = Path("/tmp/odds.json")
+DATA_DIR = Path("/data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-TEAM_CACHE_DIR = Path("/tmp/team_cache")
-GAME_CACHE_DIR = Path("/tmp/game_cache")
-PARK_CACHE_DIR = Path("/tmp/park_cache")
+WATCHLIST_PATH = DATA_DIR / "watchlist.json"
+ODDS_PATH = DATA_DIR / "odds.json"
+
+TEAM_CACHE_DIR = DATA_DIR / "team_cache"
+GAME_CACHE_DIR = DATA_DIR / "game_cache"
+PARK_CACHE_DIR = DATA_DIR / "park_cache"
 
 for d in (TEAM_CACHE_DIR, GAME_CACHE_DIR, PARK_CACHE_DIR):
     d.mkdir(parents=True, exist_ok=True)
