@@ -59,25 +59,24 @@ VENUE_COORD_FALLBACK: dict[int, tuple[float, float]] = {
 }
 
 # ----------------------------
-# In-memory TTL cache
+# In-memory TTL cache (bounded)
 # ----------------------------
-_MEM: Dict[str, Tuple[float, Any]] = {}  # key -> (expires_ts, data)
 from collections import OrderedDict
 
 _MEM: "OrderedDict[str, Tuple[float, Any]]" = OrderedDict()
-_MEM_MAX = 120
+_MEM_MAX = 120  # max number of in-memory cache entries
 
 def mem_prune() -> None:
     now = time.time()
 
-    # remove expired
+    # remove expired entries
     expired = [k for k, (exp, _) in _MEM.items() if now > exp]
     for k in expired:
         _MEM.pop(k, None)
 
-    # remove oldest if still too big
+    # bound total size
     while len(_MEM) > _MEM_MAX:
-        _MEM.popitem(last=False)
+        _MEM.popitem(last=False)  # remove oldest
 
 def mem_get(key: str) -> Any:
     hit = _MEM.get(key)
@@ -87,6 +86,20 @@ def mem_get(key: str) -> Any:
     exp, data = hit
     if time.time() > exp:
         _MEM.pop(key, None)
+        return None
+
+    _MEM.move_to_end(key)
+    return data
+
+def mem_set(key: str, data: Any, ttl: int) -> None:
+    _MEM[key] = (time.time() + int(ttl), data)
+    _MEM.move_to_end(key)
+    mem_prune()
+
+def mem_bust(prefix: str) -> None:
+    for k in list(_MEM.keys()):
+        if k.startswith(prefix):
+            _MEM.pop(k, None)
         return None
 
     # mark as recently used
