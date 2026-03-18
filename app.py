@@ -409,6 +409,15 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+def odds_event_day(ev: dict) -> str:
+    try:
+        ct = ev.get("commence_time") or ""
+        dt_utc = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+        dt_pt = dt_utc.astimezone(LA_TZ)
+        return dt_pt.strftime("%Y-%m-%d")
+    except Exception:
+        return ""
+        
 def norm_team(s: str) -> str:
     return (
         (s or "")
@@ -428,8 +437,8 @@ import os
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
 
-def fetch_mlb_moneylines() -> dict:
-    k = f"odds:mlb:{today_yyyy_mm_dd()}"
+def fetch_mlb_moneylines(day: str) -> dict:
+    k = f"odds:mlb:{day}"
     cached = mem_get(k)
     if cached is not None:
         return cached
@@ -454,6 +463,11 @@ def fetch_mlb_moneylines() -> dict:
         out = {}
 
         for ev in data:
+            
+            if odds_event_day(ev) != day:
+                continue
+                
+            print("ODDS EVENT:", ev.get("commence_time"), ev.get("away_team"), "vs", ev.get("home_team"))
             home_raw = ev.get("home_team") or ""
             away_raw = ev.get("away_team") or ""
 
@@ -495,14 +509,14 @@ def fetch_mlb_moneylines() -> dict:
         print("ODDS API ERROR:", e)
         return {}
         
-def get_game_odds_simple(game: dict) -> tuple[float, float]:
+def get_game_odds_simple(game: dict, day: str) -> tuple[float, float]:
     try:
         teams = game.get("teams") or {}
 
         away = norm_team((((teams.get("away") or {}).get("team") or {}).get("name") or ""))
         home = norm_team((((teams.get("home") or {}).get("team") or {}).get("name") or ""))
 
-        odds_map = fetch_mlb_moneylines()
+        odds_map = fetch_mlb_moneylines(day)
 
         print("LOOKUP:", away, "vs", home)
 
@@ -1580,7 +1594,7 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
     home_p = logistic_prob(diff)
     away_p = 1.0 - home_p
 
-    away_odds, home_odds = get_game_odds_simple(game)
+    away_odds, home_odds = get_game_odds_simple(game, today_yyyy_mm_dd())
  
     away_imp = american_to_prob(away_odds)
     home_imp = american_to_prob(home_odds)
