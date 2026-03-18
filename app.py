@@ -488,13 +488,18 @@ def get_game_odds_simple(game: dict) -> tuple[float, float]:
 
         odds_map = fetch_mlb_moneylines()
 
+        print("LOOKUP:", away, "vs", home)
+
         if (away, home) in odds_map:
+            print("FOUND ODDS:", odds_map[(away, home)])
             return odds_map[(away, home)]
+
+        print("NO MATCH IN ODDS MAP")
 
     except Exception as e:
         print("GAME ODDS ERROR:", e)
 
-    return -110.0, -110.0
+    return -110.0, -110.0        
  
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
