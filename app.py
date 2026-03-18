@@ -409,6 +409,21 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+def norm_team(s: str) -> str:
+    return (
+        (s or "")
+        .strip()
+        .lower()
+        .replace(".", "")
+        .replace("'", "")
+        .replace("-", "")
+        .replace(" ", "")
+    )
+    
+import os
+
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
+
 import os
 
 ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
@@ -420,6 +435,7 @@ def fetch_mlb_moneylines() -> dict:
         return cached
 
     if not ODDS_API_KEY:
+        print("ODDS API KEY MISSING")
         return {}
 
     try:
@@ -438,17 +454,14 @@ def fetch_mlb_moneylines() -> dict:
         out = {}
 
         for ev in data:
-            home = ev.get("home_team", "").lower()
-            teams = ev.get("teams") or []
+            home_raw = ev.get("home_team") or ""
+            away_raw = ev.get("away_team") or ""
 
-            if len(teams) != 2:
-                continue
-
-            away = teams[0] if teams[1].lower() == home else teams[1]
-            away = away.lower()
+            home = norm_team(home_raw)
+            away = norm_team(away_raw)
 
             bookmakers = ev.get("bookmakers") or []
-            if not bookmakers:
+            if not bookmakers or not home or not away:
                 continue
 
             markets = bookmakers[0].get("markets") or []
@@ -456,22 +469,25 @@ def fetch_mlb_moneylines() -> dict:
                 continue
 
             outcomes = markets[0].get("outcomes") or []
-
             away_ml = None
             home_ml = None
 
             for o in outcomes:
-                name = o.get("name", "").lower()
+                name_raw = o.get("name") or ""
                 price = o.get("price")
 
-                if name == away:
+                nm = norm_team(name_raw)
+
+                if nm == away:
                     away_ml = price
-                elif name == home:
+                elif nm == home:
                     home_ml = price
 
             if away_ml is not None and home_ml is not None:
                 out[(away, home)] = (float(away_ml), float(home_ml))
+                print("ODDS MAP ADD:", away, "vs", home, "->", away_ml, home_ml)
 
+        print("ODDS MAP SIZE:", len(out))
         mem_set(k, out, ttl=600)
         return out
 
@@ -483,8 +499,8 @@ def get_game_odds_simple(game: dict) -> tuple[float, float]:
     try:
         teams = game.get("teams") or {}
 
-        away = (((teams.get("away") or {}).get("team") or {}).get("name") or "").lower()
-        home = (((teams.get("home") or {}).get("team") or {}).get("name") or "").lower()
+        away = norm_team((((teams.get("away") or {}).get("team") or {}).get("name") or ""))
+        home = norm_team((((teams.get("home") or {}).get("team") or {}).get("name") or ""))
 
         odds_map = fetch_mlb_moneylines()
 
@@ -495,11 +511,10 @@ def get_game_odds_simple(game: dict) -> tuple[float, float]:
             return odds_map[(away, home)]
 
         print("NO MATCH IN ODDS MAP")
-
     except Exception as e:
         print("GAME ODDS ERROR:", e)
 
-    return -110.0, -110.0        
+    return -110.0, -110.0
  
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
