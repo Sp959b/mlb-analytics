@@ -469,7 +469,7 @@ def fetch_mlb_moneylines(day: str) -> dict:
             print("ODDS EVENT DAY:", ev_day, "| RAW:", ev.get("commence_time"), "|", ev.get("away_team"), "vs", ev.get("home_team"))
 
             if ev_day != day:
-            continue
+                continue
             
             home_raw = ev.get("home_team") or ""
             away_raw = ev.get("away_team") or ""
