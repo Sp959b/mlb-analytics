@@ -409,23 +409,90 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+import os
+
+ODDS_API_KEY = os.getenv("ODDS_API_KEY", "").strip()
+
+def fetch_mlb_moneylines() -> dict:
+    k = f"odds:mlb:{today_yyyy_mm_dd()}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    if not ODDS_API_KEY:
+        return {}
+
+    try:
+        url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds"
+        params = {
+            "apiKey": ODDS_API_KEY,
+            "regions": "us",
+            "markets": "h2h",
+            "oddsFormat": "american",
+        }
+
+        r = HTTP.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+
+        out = {}
+
+        for ev in data:
+            home = ev.get("home_team", "").lower()
+            teams = ev.get("teams") or []
+
+            if len(teams) != 2:
+                continue
+
+            away = teams[0] if teams[1].lower() == home else teams[1]
+            away = away.lower()
+
+            bookmakers = ev.get("bookmakers") or []
+            if not bookmakers:
+                continue
+
+            markets = bookmakers[0].get("markets") or []
+            if not markets:
+                continue
+
+            outcomes = markets[0].get("outcomes") or []
+
+            away_ml = None
+            home_ml = None
+
+            for o in outcomes:
+                name = o.get("name", "").lower()
+                price = o.get("price")
+
+                if name == away:
+                    away_ml = price
+                elif name == home:
+                    home_ml = price
+
+            if away_ml is not None and home_ml is not None:
+                out[(away, home)] = (float(away_ml), float(home_ml))
+
+        mem_set(k, out, ttl=600)
+        return out
+
+    except Exception as e:
+        print("ODDS API ERROR:", e)
+        return {}
+        
 def get_game_odds_simple(game: dict) -> tuple[float, float]:
     try:
         teams = game.get("teams") or {}
-        away = ((teams.get("away") or {}).get("team") or {}).get("name", "")
-        home = ((teams.get("home") or {}).get("team") or {}).get("name", "")
 
-        if away == "Philadelphia Phillies" and home == "Atlanta Braves":
-            return 140.0, -165.0
+        away = (((teams.get("away") or {}).get("team") or {}).get("name") or "").lower()
+        home = (((teams.get("home") or {}).get("team") or {}).get("name") or "").lower()
 
-        if away == "Boston Red Sox" and home == "New York Yankees":
-            return 125.0, -145.0
+        odds_map = fetch_mlb_moneylines()
 
-        if away == "Houston Astros" and home == "St. Louis Cardinals":
-            return -102.0, -118.0
+        if (away, home) in odds_map:
+            return odds_map[(away, home)]
 
-    except Exception:
-        pass
+    except Exception as e:
+        print("GAME ODDS ERROR:", e)
 
     return -110.0, -110.0
  
