@@ -1471,73 +1471,6 @@ def estimate_recent_form(team_name: str, window_days: int = 14) -> float:
     return 0.0
 
 def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
-    teams = gteams = game.get("teams") or {}
-    away_wrap = gteams.get("away") or {}
-    home_wrap = gteams.get("home") or {}
-
-    away_team = away_wrap.get("team") or {}
-    home_team = home_wrap.get("team") or {}
-
-    away_id = int(away_team.get("id") or 0)
-    home_id = int(home_team.get("id") or 0)
-
-    away_name = away_team.get("name") or "Away"
-    home_name = home_team.get("name") or "Home"
-
-    away_pp = away_wrap.get("probablePitcher") or {}
-    home_pp = home_wrap.get("probablePitcher") or {}
-
-    away_pp_id = int(away_pp.get("id") or 0)
-    home_pp_id = int(home_pp.get("id") or 0)
-
-    away_team_score = estimate_team_strength(away_id, season)
-    home_team_score = estimate_team_strength(home_id, season)
-
-    away_pitch_score = estimate_pitcher_strength(away_pp_id, season) if away_pp_id else 0.0
-    home_pitch_score = estimate_pitcher_strength(home_pp_id, season) if home_pp_id else 0.0
-
-    away_form = estimate_recent_form(away_name, window_days=14)
-    home_form = estimate_recent_form(home_name, window_days=14)
-
-    home_bonus = 0.22
-
-    away_total = away_team_score + away_pitch_score + away_form
-    home_total = home_team_score + home_pitch_score + home_form + home_bonus
-
-    diff = home_total - away_total
-    home_p = logistic_prob(diff)
-    away_p = 1.0 - home_p
-
-    favorite = home_name if home_p >= away_p else away_name
-
-    return {
-        "away_name": away_name,
-        "home_name": home_name,
-        "away_prob": away_p,
-        "home_prob": home_p,
-        "favorite": favorite,
-        "away_pitcher": away_pp.get("fullName") or "tbd",
-        "home_pitcher": home_pp.get("fullName") or "tbd",
-    }
-    
-def safe_float(x: Any, default: float = 0.0) -> float:
-    try:
-        return float(x)
-    except Exception:
-        return default
-
-
-def logistic_prob(diff: float) -> float:
-    import math
-    return 1.0 / (1.0 + math.exp(-diff))
-
-
-def american_to_prob(odds: float) -> float:
-    if odds > 0:
-        return 100.0 / (odds + 100.0)
-    return abs(odds) / (abs(odds) + 100.0)
-    
-def estimate_matchup_win_probs(game: dict, season: int) -> dict:
     gteams = game.get("teams") or {}
     away_wrap = gteams.get("away") or {}
     home_wrap = gteams.get("home") or {}
@@ -1599,13 +1532,14 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
     home_p = logistic_prob(diff)
     away_p = 1.0 - home_p
 
+    # IMPORTANT: use selected page day, not today's actual day
     away_odds, home_odds = get_game_odds_simple(game, day)
- 
-    away_imp = american_to_prob(away_odds)
-    home_imp = american_to_prob(home_odds)
 
-    away_edge = away_p - away_imp
-    home_edge = home_p - home_imp
+    away_imp = american_to_prob(away_odds) if away_odds is not None else None
+    home_imp = american_to_prob(home_odds) if home_odds is not None else None
+
+    away_edge = (away_p - away_imp) if away_imp is not None else None
+    home_edge = (home_p - home_imp) if home_imp is not None else None
 
     favorite = home_name if home_p >= away_p else away_name
 
@@ -1623,6 +1557,7 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
         "home_pitcher": home_pp.get("fullName") or "tbd",
     }
     
+
 # ----------------------------
 # Routes
 # ----------------------------
@@ -2364,8 +2299,9 @@ def today_games(date: str = ""):
 
             away_prob_str = f"{probs['away_prob'] * 100:.0f}%"
             home_prob_str = f"{probs['home_prob'] * 100:.0f}%"
-            away_edge_str = f"{probs['away_edge'] * 100:+.1f}%"
-            home_edge_str = f"{probs['home_edge'] * 100:+.1f}%"
+            
+            away_edge_str = f"{probs['away_edge'] * 100:+.1f}%" if probs.get("away_edge") is not None else "n/a"
+            home_edge_str = f"{probs['home_edge'] * 100:+.1f}%" if probs.get("home_edge") is not None else "n/a"
 
             win_box = f"""
 <div class="mt-2">
