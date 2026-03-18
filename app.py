@@ -409,6 +409,23 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+def get_game_odds_simple(game: dict) -> tuple[float, float]:
+    try:
+        teams = game.get("teams") or {}
+        away = teams.get("away") or {}
+        home = teams.get("home") or {}
+
+        # ESPN sometimes includes odds in linescore/odds
+        odds = game.get("odds") or []
+        if odds:
+            o = odds[0]
+            return float(o.get("awayMoneyLine", -110)), float(o.get("homeMoneyLine", -110))
+    except Exception:
+        pass
+
+    # fallback
+    return -110.0, -110.0
+    
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
     cached = mem_get(k)
@@ -1473,10 +1490,8 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
     home_p = logistic_prob(diff)
     away_p = 1.0 - home_p
 
-    # placeholder odds for now
-    away_odds = -110
-    home_odds = -110
-
+    away_odds, home_odds = get_game_odds_simple(game)
+ 
     away_imp = american_to_prob(away_odds)
     home_imp = american_to_prob(home_odds)
 
