@@ -411,21 +411,21 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 def get_game_odds_simple(game: dict) -> tuple[float, float]:
     try:
-        teams = game.get("teams") or {}
-        away = teams.get("away") or {}
-        home = teams.get("home") or {}
-
-        # ESPN sometimes includes odds in linescore/odds
         odds = game.get("odds") or []
+        print("ODDS DEBUG:", odds)
+
         if odds:
             o = odds[0]
-            return float(o.get("awayMoneyLine", -110)), float(o.get("homeMoneyLine", -110))
-    except Exception:
-        pass
+            away_ml = float(o.get("awayMoneyLine", -110))
+            home_ml = float(o.get("homeMoneyLine", -110))
+            print("ODDS FOUND:", away_ml, home_ml)
+            return away_ml, home_ml
+    except Exception as e:
+        print("ODDS ERROR:", e)
 
-    # fallback
+    print("ODDS FALLBACK: using -110 / -110")
     return -110.0, -110.0
-    
+  
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
     cached = mem_get(k)
