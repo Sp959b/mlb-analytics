@@ -2314,8 +2314,8 @@ def today_games(date: str = ""):
   </div>
 </div>
 """
-        except Exception:
-            win_box = "<div class='dark-muted small mt-2'>Win model unavailable</div>"
+        except Exception as e:
+            win_box = f"<div class='text-danger small mt-2'>MODEL ERROR: {hs(e)}</div>"
         
         link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
         link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
