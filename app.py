@@ -1194,7 +1194,168 @@ def layout(title: str, body: str) -> str:
 </body>
 </html>
 """
+    
+def get_team_record(team_id: int, season: int) -> tuple[int, int]:
+    try:
+        data = mlb_get(
+            f"/api/v1/teams/{int(team_id)}/stats",
+            params={"stats": "season", "group": "hitting", "season": int(season), "gameType": "R"},
+        )
+        stats = data.get("stats") or []
+        splits = (stats[0].get("splits") if stats else []) or []
+        if not splits:
+            return (0, 0)
 
+        team_info = splits[0].get("team") or {}
+        record = team_info.get("record") or {}
+        wins = int(record.get("wins") or 0)
+        losses = int(record.get("losses") or 0)
+        return (wins, losses)
+    except Exception:
+        return (0, 0)
+
+
+def get_pitcher_season_stats(pid: int, season: int) -> dict:
+    if not pid:
+        return {}
+
+    k = f"pitcher_stats:{int(pid)}:{int(season)}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    try:
+        data = mlb_get(
+            "/api/v1/people",
+            params={
+                "personIds": str(int(pid)),
+                "hydrate": f"stats(group=[pitching],type=[season],season={int(season)})",
+            },
+        )
+        people = data.get("people") or []
+        if not people:
+            return {}
+
+        stats = people[0].get("stats") or []
+        splits = (stats[0].get("splits") if stats else []) or []
+        stat = (splits[0].get("stat") if splits else {}) or {}
+
+        mem_set(k, stat, ttl=60 * 30)
+        return stat
+    except Exception:
+        return {}
+
+
+def safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+
+def logistic_prob(diff: float) -> float:
+    # smooth conversion from score diff to probability
+    import math
+    return 1.0 / (1.0 + math.exp(-diff))
+
+
+def estimate_team_strength(team_id: int, season: int) -> float:
+    wins, losses = get_team_record(team_id, season)
+    games = wins + losses
+    if games <= 0:
+        return 0.0
+
+    win_pct = wins / games
+    # centered around .500
+    return (win_pct - 0.500) * 4.0
+
+
+def estimate_pitcher_strength(pid: int, season: int) -> float:
+    st = get_pitcher_season_stats(pid, season)
+    if not st:
+        return 0.0
+
+    era = safe_float(st.get("era"), 4.20)
+    whip = safe_float(st.get("whip"), 1.30)
+    so = safe_float(st.get("strikeOuts"), 0.0)
+    ip = safe_float(st.get("inningsPitched"), 0.0)
+
+    k9 = (so / ip * 9.0) if ip > 0 else 8.0
+
+    # simple score: lower ERA/WHIP better, higher K/9 better
+    score = 0.0
+    score += (4.20 - era) * 0.35
+    score += (1.30 - whip) * 1.20
+    score += (k9 - 8.0) * 0.08
+    return score
+
+
+def estimate_recent_form(team_name: str, window_days: int = 14) -> float:
+    rows = hot_teams(window_days=window_days) or []
+    for r in rows:
+        if (r.get("team") or "").strip().lower() == team_name.strip().lower():
+            hr_g = safe_float(r.get("hr_g"), 0.0)
+            r_g = safe_float(r.get("r_g"), 0.0)
+            ops = safe_float(r.get("ops"), 0.720)
+
+            score = 0.0
+            score += (hr_g - 1.10) * 0.35
+            score += (r_g - 4.50) * 0.18
+            score += (ops - 0.720) * 6.0
+            return score
+    return 0.0
+
+
+def estimate_matchup_win_probs(game: dict, season: int) -> dict:
+    teams = gteams = game.get("teams") or {}
+    away_wrap = gteams.get("away") or {}
+    home_wrap = gteams.get("home") or {}
+
+    away_team = away_wrap.get("team") or {}
+    home_team = home_wrap.get("team") or {}
+
+    away_id = int(away_team.get("id") or 0)
+    home_id = int(home_team.get("id") or 0)
+
+    away_name = away_team.get("name") or "Away"
+    home_name = home_team.get("name") or "Home"
+
+    away_pp = away_wrap.get("probablePitcher") or {}
+    home_pp = home_wrap.get("probablePitcher") or {}
+
+    away_pp_id = int(away_pp.get("id") or 0)
+    home_pp_id = int(home_pp.get("id") or 0)
+
+    away_team_score = estimate_team_strength(away_id, season)
+    home_team_score = estimate_team_strength(home_id, season)
+
+    away_pitch_score = estimate_pitcher_strength(away_pp_id, season) if away_pp_id else 0.0
+    home_pitch_score = estimate_pitcher_strength(home_pp_id, season) if home_pp_id else 0.0
+
+    away_form = estimate_recent_form(away_name, window_days=14)
+    home_form = estimate_recent_form(home_name, window_days=14)
+
+    home_bonus = 0.22
+
+    away_total = away_team_score + away_pitch_score + away_form
+    home_total = home_team_score + home_pitch_score + home_form + home_bonus
+
+    diff = home_total - away_total
+    home_p = logistic_prob(diff)
+    away_p = 1.0 - home_p
+
+    favorite = home_name if home_p >= away_p else away_name
+
+    return {
+        "away_name": away_name,
+        "home_name": home_name,
+        "away_prob": away_p,
+        "home_prob": home_p,
+        "favorite": favorite,
+        "away_pitcher": away_pp.get("fullName") or "tbd",
+        "home_pitcher": home_pp.get("fullName") or "tbd",
+    }
+    
 # ----------------------------
 # Routes
 # ----------------------------
@@ -1930,6 +2091,26 @@ def today_games(date: str = ""):
         pp_away_name = pp_away.get("fullName") or "tbd"
         pp_home_id = pp_home.get("id")
         pp_away_id = pp_away.get("id")
+        win_box = ""
+        try:
+            probs = estimate_matchup_win_probs(g, year)
+
+            away_prob_str = f"{probs['away_prob'] * 100:.0f}%"
+            home_prob_str = f"{probs['home_prob'] * 100:.0f}%"
+
+            win_box = f"""
+<div class="mt-2">
+  <div class="dark-muted small">
+    Projected Winner: <span class="fw-semibold text-light">{hs(probs['favorite'])}</span>
+  </div>
+  <div class="dark-muted small">
+    {hs(probs['away_name'])} {hs(away_prob_str)} • {hs(probs['home_name'])} {hs(home_prob_str)}
+  </div>
+</div>
+"""
+        except Exception:
+            win_box = "<div class='dark-muted small mt-2'>Win model unavailable</div>"
+        
 
         link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
         link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
@@ -1945,6 +2126,7 @@ def today_games(date: str = ""):
     <div>
       <div class="h5 fw-semibold mb-1">{hs(away_name)} at {hs(home_name)}</div>
       <div class="dark-muted small">{hs(day)} - {hs(start)} - {hs(venue)}</div>
+      {win_box}
       
       {wx_line}
     </div>
