@@ -528,11 +528,6 @@ def get_game_odds_simple(game: dict, day: str) -> tuple[Optional[float], Optiona
             return odds_map[(away, home)]
 
         print("NO MATCH IN ODDS MAP")
-    except Exception as e:
-        print("GAME ODDS ERROR:", e)
-        print("FETCH DAY:", day)
-        print("ODDS MAP SIZE:", len(out))
-        print("ODDS MAP KEYS SAMPLE:", list(out.keys())[:5])
 
     return None, None
  
@@ -2314,8 +2309,8 @@ def today_games(date: str = ""):
   </div>
 </div>
 """
-        except Exception as e:
-            win_box = f"<div class='text-danger small mt-2'>MODEL ERROR: {hs(e)}</div>"
+        except Exception:
+            win_box = "<div class='dark-muted small mt-2'>Win model unavailable</div>"
         
         link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
         link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
