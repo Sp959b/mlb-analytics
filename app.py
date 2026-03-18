@@ -461,13 +461,16 @@ def fetch_mlb_moneylines(day: str) -> dict:
         data = r.json()
 
         out = {}
-
+        
+        print("TODAY PAGE DAY:", day)
+        
         for ev in data:
+            ev_day = odds_event_day(ev)
+            print("ODDS EVENT DAY:", ev_day, "| RAW:", ev.get("commence_time"), "|", ev.get("away_team"), "vs", ev.get("home_team"))
+
+            if ev_day != day:
+            continue
             
-            if odds_event_day(ev) != day:
-                continue
-                
-            print("ODDS EVENT:", ev.get("commence_time"), ev.get("away_team"), "vs", ev.get("home_team"))
             home_raw = ev.get("home_team") or ""
             away_raw = ev.get("away_team") or ""
 
