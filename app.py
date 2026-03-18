@@ -409,6 +409,25 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+def get_team_offense_stats(team_id: int, season: int) -> dict:
+    k = f"team_off:{team_id}:{season}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    try:
+        data = mlb_get(
+            f"/api/v1/teams/{int(team_id)}/stats",
+            params={"stats": "season", "group": "hitting", "season": int(season)},
+        )
+        stats = data.get("stats") or []
+        splits = (stats[0].get("splits") if stats else []) or []
+        stat = (splits[0].get("stat") if splits else {}) or {}
+        mem_set(k, stat, ttl=60 * 30)
+        return stat
+    except Exception:
+        return {}
+        
 def today_yyyy_mm_dd() -> str:
     return datetime.now(LA_TZ).strftime("%Y-%m-%d")
 
@@ -504,6 +523,25 @@ def get_today_team_ids(day: str) -> List[int]:
 # ----------------------------
 # Pitcher matchup + handedness helpers
 # ----------------------------
+def get_team_pitching_stats(team_id: int, season: int) -> dict:
+    k = f"team_pitch:{team_id}:{season}"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    try:
+        data = mlb_get(
+            f"/api/v1/teams/{int(team_id)}/stats",
+            params={"stats": "season", "group": "pitching", "season": int(season)},
+        )
+        stats = data.get("stats") or []
+        splits = (stats[0].get("splits") if stats else []) or []
+        stat = (splits[0].get("stat") if splits else {}) or {}
+        mem_set(k, stat, ttl=60 * 30)
+        return stat
+    except Exception:
+        return {}
+        
 
 def get_player_detail_cached(pid: int) -> Optional[dict]:
     if not pid:
@@ -1356,6 +1394,111 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
         "home_pitcher": home_pp.get("fullName") or "tbd",
     }
     
+def safe_float(x: Any, default: float = 0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+
+def logistic_prob(diff: float) -> float:
+    import math
+    return 1.0 / (1.0 + math.exp(-diff))
+
+
+def american_to_prob(odds: float) -> float:
+    if odds > 0:
+        return 100.0 / (odds + 100.0)
+    return abs(odds) / (abs(odds) + 100.0)
+    
+def estimate_matchup_win_probs(game: dict, season: int) -> dict:
+    gteams = game.get("teams") or {}
+    away_wrap = gteams.get("away") or {}
+    home_wrap = gteams.get("home") or {}
+
+    away_team = away_wrap.get("team") or {}
+    home_team = home_wrap.get("team") or {}
+
+    away_id = int(away_team.get("id") or 0)
+    home_id = int(home_team.get("id") or 0)
+
+    away_name = away_team.get("name") or "Away"
+    home_name = home_team.get("name") or "Home"
+
+    away_pp = away_wrap.get("probablePitcher") or {}
+    home_pp = home_wrap.get("probablePitcher") or {}
+
+    away_pp_id = int(away_pp.get("id") or 0)
+    home_pp_id = int(home_pp.get("id") or 0)
+
+    # team strength
+    away_team_score = estimate_team_strength(away_id, season)
+    home_team_score = estimate_team_strength(home_id, season)
+
+    # starters
+    away_pitch_score = estimate_pitcher_strength(away_pp_id, season) if away_pp_id else 0.0
+    home_pitch_score = estimate_pitcher_strength(home_pp_id, season) if home_pp_id else 0.0
+
+    # offense
+    away_off = get_team_offense_stats(away_id, season)
+    home_off = get_team_offense_stats(home_id, season)
+
+    away_ops = safe_float(away_off.get("ops"), 0.720)
+    home_ops = safe_float(home_off.get("ops"), 0.720)
+
+    away_off_score = (away_ops - 0.720) * 5.0
+    home_off_score = (home_ops - 0.720) * 5.0
+
+    # bullpen / team pitching
+    away_pitch_team = get_team_pitching_stats(away_id, season)
+    home_pitch_team = get_team_pitching_stats(home_id, season)
+
+    away_era = safe_float(away_pitch_team.get("era"), 4.20)
+    home_era = safe_float(home_pitch_team.get("era"), 4.20)
+
+    away_bp_score = (4.20 - away_era) * 0.40
+    home_bp_score = (4.20 - home_era) * 0.40
+
+    # recent form
+    away_form = estimate_recent_form(away_name, window_days=14)
+    home_form = estimate_recent_form(home_name, window_days=14)
+
+    # home field edge
+    home_bonus = 0.22
+
+    away_total = away_team_score + away_pitch_score + away_off_score + away_bp_score + away_form
+    home_total = home_team_score + home_pitch_score + home_off_score + home_bp_score + home_form + home_bonus
+
+    diff = home_total - away_total
+    home_p = logistic_prob(diff)
+    away_p = 1.0 - home_p
+
+    # placeholder odds for now
+    away_odds = -110
+    home_odds = -110
+
+    away_imp = american_to_prob(away_odds)
+    home_imp = american_to_prob(home_odds)
+
+    away_edge = away_p - away_imp
+    home_edge = home_p - home_imp
+
+    favorite = home_name if home_p >= away_p else away_name
+
+    return {
+        "away_name": away_name,
+        "home_name": home_name,
+        "away_prob": away_p,
+        "home_prob": home_p,
+        "away_imp": away_imp,
+        "home_imp": home_imp,
+        "away_edge": away_edge,
+        "home_edge": home_edge,
+        "favorite": favorite,
+        "away_pitcher": away_pp.get("fullName") or "tbd",
+        "home_pitcher": home_pp.get("fullName") or "tbd",
+    }
+    
 # ----------------------------
 # Routes
 # ----------------------------
@@ -2097,6 +2240,8 @@ def today_games(date: str = ""):
 
             away_prob_str = f"{probs['away_prob'] * 100:.0f}%"
             home_prob_str = f"{probs['home_prob'] * 100:.0f}%"
+            away_edge_str = f"{probs['away_edge'] * 100:+.1f}%"
+            home_edge_str = f"{probs['home_edge'] * 100:+.1f}%"
 
             win_box = f"""
 <div class="mt-2">
@@ -2104,14 +2249,14 @@ def today_games(date: str = ""):
     Projected Winner: <span class="fw-semibold text-light">{hs(probs['favorite'])}</span>
   </div>
   <div class="dark-muted small">
-    {hs(probs['away_name'])} {hs(away_prob_str)} • {hs(probs['home_name'])} {hs(home_prob_str)}
+    {hs(probs['away_name'])} {hs(away_prob_str)} (edge {hs(away_edge_str)}) •
+    {hs(probs['home_name'])} {hs(home_prob_str)} (edge {hs(home_edge_str)})
   </div>
 </div>
 """
         except Exception:
             win_box = "<div class='dark-muted small mt-2'>Win model unavailable</div>"
         
-
         link_home = f'/player/{pp_home_id}?season={year}' if pp_home_id else None
         link_away = f'/player/{pp_away_id}?season={year}' if pp_away_id else None
 
