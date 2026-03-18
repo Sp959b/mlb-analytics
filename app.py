@@ -1535,8 +1535,8 @@ def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
     # IMPORTANT: use selected page day, not today's actual day
     away_odds, home_odds = get_game_odds_simple(game, day)
 
-    away_imp = american_to_prob(away_odds) if away_odds is not None else None
-    home_imp = american_to_prob(home_odds) if home_odds is not None else None
+    away_imp = american_to_implied_prob(away_odds) if away_odds is not None else None
+    home_imp = american_to_implied_prob(home_odds) if home_odds is not None else None
 
     away_edge = (away_p - away_imp) if away_imp is not None else None
     home_edge = (home_p - home_imp) if home_imp is not None else None
