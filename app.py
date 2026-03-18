@@ -512,7 +512,7 @@ def fetch_mlb_moneylines(day: str) -> dict:
         print("ODDS API ERROR:", e)
         return {}
         
-def get_game_odds_simple(game: dict, day: str) -> tuple[float, float]:
+def get_game_odds_simple(game: dict, day: str) -> tuple[Optional[float], Optional[float]]:
     try:
         teams = game.get("teams") or {}
 
@@ -530,8 +530,11 @@ def get_game_odds_simple(game: dict, day: str) -> tuple[float, float]:
         print("NO MATCH IN ODDS MAP")
     except Exception as e:
         print("GAME ODDS ERROR:", e)
+        print("FETCH DAY:", day)
+        print("ODDS MAP SIZE:", len(out))
+        print("ODDS MAP KEYS SAMPLE:", list(out.keys())[:5])
 
-    return -110.0, -110.0
+    return None, None
  
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
@@ -1467,8 +1470,7 @@ def estimate_recent_form(team_name: str, window_days: int = 14) -> float:
             return score
     return 0.0
 
-
-def estimate_matchup_win_probs(game: dict, season: int) -> dict:
+def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
     teams = gteams = game.get("teams") or {}
     away_wrap = gteams.get("away") or {}
     home_wrap = gteams.get("home") or {}
@@ -1597,7 +1599,7 @@ def estimate_matchup_win_probs(game: dict, season: int) -> dict:
     home_p = logistic_prob(diff)
     away_p = 1.0 - home_p
 
-    away_odds, home_odds = get_game_odds_simple(game, today_yyyy_mm_dd())
+    away_odds, home_odds = get_game_odds_simple(game, day)
  
     away_imp = american_to_prob(away_odds)
     home_imp = american_to_prob(home_odds)
@@ -2358,7 +2360,7 @@ def today_games(date: str = ""):
         pp_away_id = pp_away.get("id")
         win_box = ""
         try:
-            probs = estimate_matchup_win_probs(g, year)
+            probs = estimate_matchup_win_probs(g, year, day)
 
             away_prob_str = f"{probs['away_prob'] * 100:.0f}%"
             home_prob_str = f"{probs['home_prob'] * 100:.0f}%"
