@@ -528,8 +528,8 @@ def get_game_odds_simple(game: dict, day: str) -> tuple[Optional[float], Optiona
             return odds_map[(away, home)]
 
         print("NO MATCH IN ODDS MAP")
-
-    return None, None
+    except Exception as e:
+        return None, None
  
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
