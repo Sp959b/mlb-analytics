@@ -1763,13 +1763,95 @@ def fmt_american(odds: Optional[float]) -> str:
         o = int(round(float(odds)))
         return f"+{o}" if o > 0 else str(o)
     except Exception:
-        return "n/a"    
+        return "n/a"
+        
+def grade_bet(team: str, home_team: str, away_team: str, home_score: int, away_score: int) -> Optional[str]:
+    if team == home_team:
+        if home_score > away_score:
+            return "win"
+        if home_score < away_score:
+            return "loss"
+        return "push"
+
+    if team == away_team:
+        if away_score > home_score:
+            return "win"
+        if away_score < home_score:
+            return "loss"
+        return "push"
+
+    return None 
+
+def auto_grade_bets() -> None:
+    obj = load_bets()
+    bets = obj.get("bets", [])
+    changed = False
+
+    # group open bets by day so we only fetch each date once
+    open_days = sorted({
+        b.get("day")
+        for b in bets
+        if not (b.get("result") or "").strip()
+    })
+
+    day_games: dict[str, list[dict]] = {}
+
+    for day in open_days:
+        try:
+            sched = mlb_get(
+                "/api/v1/schedule",
+                params={"sportId": 1, "date": day}
+            )
+            dates = sched.get("dates") or []
+            games = (dates[0].get("games") if dates else []) or []
+            day_games[day] = games
+        except Exception:
+            day_games[day] = []
+
+    for b in bets:
+        if (b.get("result") or "").strip():
+            continue
+
+        day = b.get("day") or ""
+        team = b.get("team") or ""
+
+        games = day_games.get(day, [])
+        for g in games:
+            status = ((g.get("status") or {}).get("detailedState") or "")
+            if status != "Final":
+                continue
+
+            home_wrap = (g.get("teams") or {}).get("home") or {}
+            away_wrap = (g.get("teams") or {}).get("away") or {}
+
+            home_team = ((home_wrap.get("team") or {}).get("name") or "")
+            away_team = ((away_wrap.get("team") or {}).get("name") or "")
+
+            if team not in (home_team, away_team):
+                continue
+
+            try:
+                home_score = int(home_wrap.get("score") or 0)
+                away_score = int(away_wrap.get("score") or 0)
+            except Exception:
+                continue
+
+            result = grade_bet(team, home_team, away_team, home_score, away_score)
+            if result:
+                b["result"] = result
+                changed = True
+            break
+
+    if changed:
+        obj["bets"] = bets
+        save_bets(obj)
         
 # ----------------------------
 # Routes
 # ----------------------------
 @app.get("/bets", response_class=HTMLResponse)
 def bets_dashboard():
+    auto_grade_bets()
     obj = load_bets()
     bets = obj.get("bets", [])
 
