@@ -49,6 +49,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 WATCHLIST_PATH = DATA_DIR / "watchlist.json"
 ODDS_PATH = DATA_DIR / "odds.json"
+BETS_PATH = DATA_DIR / "bets.json"
 
 TEAM_CACHE_DIR = DATA_DIR / "team_cache"
 GAME_CACHE_DIR = DATA_DIR / "game_cache"
@@ -267,6 +268,29 @@ def get_odds(pid: int, date: str, odds_obj: Optional[dict] = None) -> Optional[i
 # ----------------------------
 # Math helpers
 # ----------------------------
+def units_from_result(odds: Optional[float], stake_units: float, result: str) -> Optional[float]:
+    if odds is None or stake_units is None:
+        return None
+
+    try:
+        odds = float(odds)
+        stake_units = float(stake_units)
+    except Exception:
+        return None
+
+    result = (result or "").strip().lower()
+
+    if result == "push":
+        return 0.0
+    if result == "loss":
+        return -stake_units
+    if result != "win":
+        return None
+
+    if odds > 0:
+        return stake_units * (odds / 100.0)
+    return stake_units * (100.0 / abs(odds))
+    
 def model_hit_game_prob(p_hit_per_ab: float, ab_proj: float = 3.8) -> float:
     p = max(0.0001, min(0.60, float(p_hit_per_ab)))
     ab = max(1.0, float(ab_proj))
@@ -674,6 +698,71 @@ def get_today_team_ids(day: str) -> List[int]:
         except Exception:
             pass
     return sorted(set(out))
+    
+def load_bets() -> dict:
+    k = "bets:load"
+    cached = mem_get(k)
+    if cached is not None:
+        return cached
+
+    try:
+        if BETS_PATH.exists():
+            data = json.loads(BETS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("bets", []), list):
+                mem_set(k, data, ttl=3)
+                return data
+    except Exception:
+        pass
+
+    data = {"bets": []}
+    mem_set(k, data, ttl=3)
+    return data
+
+
+def save_bets(obj: dict) -> None:
+    BETS_PATH.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+    mem_bust("bets:")  
+    
+def add_bet(
+    day: str,
+    matchup: str,
+    team: str,
+    odds: Optional[float],
+    model_prob: Optional[float],
+    implied_prob: Optional[float],
+    edge: Optional[float],
+    tier: str,
+    stake_pct: float,
+) -> None:
+    obj = load_bets()
+    bets = obj.get("bets", [])
+
+    # avoid duplicates for same day/matchup/team
+    for b in bets:
+        if (
+            b.get("day") == day
+            and b.get("matchup") == matchup
+            and b.get("team") == team
+        ):
+            return
+
+    bets.append({
+        "day": day,
+        "matchup": matchup,
+        "team": team,
+        "odds": odds,
+        "model_prob": model_prob,
+        "implied_prob": implied_prob,
+        "edge": edge,
+        "tier": tier,
+        "stake_pct": stake_pct,
+        "result": "",        # "", "win", "loss", "push"
+        "units": None,       # filled in later
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    })
+
+    obj["bets"] = bets
+    save_bets(obj)
     
 # ----------------------------
 # Pitcher matchup + handedness helpers
@@ -1348,6 +1437,7 @@ def layout(title: str, body: str) -> str:
     <a href="/today-hitters">Today's Hitters</a>
     <a href="/today-hits">Today Hits</a>
     <a href="/today-ks">Today Ks</a>
+    <a href="/bets">Bet Tracker</a>
     <a href="/leaderboard/parks">Parks</a>
     <a href="/leaderboard/teams-hot">Hot Teams</a>
     <a href="/leaderboard/hr-props">HR Board</a>
@@ -1369,6 +1459,7 @@ def layout(title: str, body: str) -> str:
       <a href="/today-hits">Today Hits</a>
       <a href="/today-ks">Today Ks</a>
       <a href="/leaderboard/parks">Parks</a>
+      <a href="/bets">Bet Tracker</a>
       <a href="/leaderboard/teams-hot">Hot Teams</a>
       <a href="/leaderboard/hr-props">HR Board</a>
       <a href="/leaderboard/heat">Heat Board</a>
@@ -1557,7 +1648,7 @@ def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
     home_total = home_team_score + home_pitch_score + home_off_score + home_bp_score + home_form + home_bonus
 
     diff = home_total - away_total
-    scaled_diff = diff * 0.35   
+    scaled_diff = diff * 0.25   
     
     home_p = logistic_prob(scaled_diff)
     away_p = 1.0 - home_p
@@ -1677,6 +1768,168 @@ def fmt_american(odds: Optional[float]) -> str:
 # ----------------------------
 # Routes
 # ----------------------------
+@app.get("/bets", response_class=HTMLResponse)
+def bets_dashboard():
+    obj = load_bets()
+    bets = obj.get("bets", [])
+
+    total_bets = 0
+    wins = 0
+    losses = 0
+    pushes = 0
+    total_units = 0.0
+    total_risk = 0.0
+
+    rows_html = ""
+
+    for i, b in enumerate(reversed(bets), start=1):
+        result = (b.get("result") or "").strip().lower()
+        odds = b.get("odds")
+        stake_pct = float(b.get("stake_pct") or 0.0)
+
+        # treat 1 unit = 1% bankroll for now
+        stake_units = stake_pct * 100.0
+        units = units_from_result(odds, stake_units, result)
+
+        if result in ("win", "loss", "push"):
+            total_bets += 1
+            total_risk += stake_units
+            if units is not None:
+                total_units += units
+
+            if result == "win":
+                wins += 1
+            elif result == "loss":
+                losses += 1
+            elif result == "push":
+                pushes += 1
+
+        units_str = "n/a" if units is None else f"{units:+.2f}"
+        edge_str = "n/a" if b.get("edge") is None else f"{float(b['edge']) * 100:+.1f}%"
+        odds_str = fmt_american(b.get("odds"))
+        stake_str = f"{stake_pct * 100:.1f}%"
+        result_badge = {
+            "win": '<span class="badge text-bg-success">Win</span>',
+            "loss": '<span class="badge text-bg-danger">Loss</span>',
+            "push": '<span class="badge text-bg-secondary">Push</span>',
+        }.get(result, '<span class="badge text-bg-dark">Open</span>')
+
+        rows_html += f"""
+<tr>
+  <td>{i}</td>
+  <td>{hs(b.get('day'))}</td>
+  <td class="fw-semibold">{hs(b.get('team'))}</td>
+  <td>{hs(b.get('matchup'))}</td>
+  <td class="text-center">{hs(odds_str)}</td>
+  <td class="text-center">{hs(edge_str)}</td>
+  <td class="text-center">{hs(stake_str)}</td>
+  <td class="text-center">{result_badge}</td>
+  <td class="text-center">{hs(units_str)}</td>
+  <td class="text-end">
+    <form action="/bets/result" method="post" class="d-inline">
+      <input type="hidden" name="index" value="{len(bets) - i}">
+      <input type="hidden" name="result" value="win">
+      <button class="btn btn-outline-success btn-sm" type="submit">Win</button>
+    </form>
+    <form action="/bets/result" method="post" class="d-inline">
+      <input type="hidden" name="index" value="{len(bets) - i}">
+      <input type="hidden" name="result" value="loss">
+      <button class="btn btn-outline-danger btn-sm" type="submit">Loss</button>
+    </form>
+    <form action="/bets/result" method="post" class="d-inline">
+      <input type="hidden" name="index" value="{len(bets) - i}">
+      <input type="hidden" name="result" value="push">
+      <button class="btn btn-outline-secondary btn-sm" type="submit">Push</button>
+    </form>
+  </td>
+</tr>
+"""
+
+    roi = (total_units / total_risk * 100.0) if total_risk > 0 else 0.0
+
+    body = f"""
+<div class="card-dark mb-3">
+  <div class="row g-3">
+    <div class="col-6 col-md-2"><div class="fw-semibold">Settled Bets</div><div class="display-6">{total_bets}</div></div>
+    <div class="col-6 col-md-2"><div class="fw-semibold">Wins</div><div class="display-6">{wins}</div></div>
+    <div class="col-6 col-md-2"><div class="fw-semibold">Losses</div><div class="display-6">{losses}</div></div>
+    <div class="col-6 col-md-2"><div class="fw-semibold">Pushes</div><div class="display-6">{pushes}</div></div>
+    <div class="col-6 col-md-2"><div class="fw-semibold">Units</div><div class="display-6">{total_units:+.2f}</div></div>
+    <div class="col-6 col-md-2"><div class="fw-semibold">ROI</div><div class="display-6">{roi:+.1f}%</div></div>
+  </div>
+</div>
+
+<div class="card-dark">
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>Team</th>
+          <th>Matchup</th>
+          <th class="text-center">Odds</th>
+          <th class="text-center">Edge</th>
+          <th class="text-center">Stake</th>
+          <th class="text-center">Result</th>
+          <th class="text-center">Units</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows_html if rows_html else '<tr><td colspan="10" class="dark-muted">No saved bets yet.</td></tr>'}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
+    return layout("Bet Tracker / P&L", body)
+    
+@app.post("/bets/result")
+def bets_result(index: int = Form(...), result: str = Form(...)):
+    obj = load_bets()
+    bets = obj.get("bets", [])
+
+    if 0 <= index < len(bets):
+        if result in ("win", "loss", "push"):
+            bets[index]["result"] = result
+            obj["bets"] = bets
+            save_bets(obj)
+
+    return RedirectResponse("/bets", status_code=303)
+    
+@app.post("/bets/add")
+def bets_add(
+    day: str = Form(...),
+    matchup: str = Form(...),
+    team: str = Form(...),
+    odds: str = Form(""),
+    model_prob: str = Form(""),
+    implied_prob: str = Form(""),
+    edge: str = Form(""),
+    tier: str = Form(""),
+    stake_pct: str = Form(""),
+    next: str = Form("/today"),
+):
+    def to_float(x: str) -> Optional[float]:
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    add_bet(
+        day=day,
+        matchup=matchup,
+        team=team,
+        odds=to_float(odds),
+        model_prob=to_float(model_prob),
+        implied_prob=to_float(implied_prob),
+        edge=to_float(edge),
+        tier=tier,
+        stake_pct=to_float(stake_pct) or 0.0,
+    )
+    return RedirectResponse(next, status_code=303)
+    
 @app.get("/api/search-players")
 def api_search_players(q: str = ""):
     q = (q or "").strip()
@@ -2407,6 +2660,19 @@ def today_games(date: str = ""):
     <div class="dark-muted small">{hs(r['matchup'])}</div>
     <div class="dark-muted small">
       Model {hs(model_str)} • Implied {hs(implied_str)} • Bet {hs(bet_str)} bankroll
+      <form action="/bets/add" method="post" class="mt-2">
+          <input type="hidden" name="day" value="{hs(day)}">
+          <input type="hidden" name="matchup" value="{hs(r['matchup'])}">
+          <input type="hidden" name="team" value="{hs(r['team'])}">
+          <input type="hidden" name="odds" value="{hs(r.get('odds'))}">
+          <input type="hidden" name="model_prob" value="{hs(r.get('model_prob'))}">
+          <input type="hidden" name="implied_prob" value="{hs(r.get('implied_prob'))}">
+          <input type="hidden" name="edge" value="{hs(r.get('edge'))}">
+          <input type="hidden" name="tier" value="{hs(tier)}">
+          <input type="hidden" name="stake_pct" value="{hs(bet_pct)}">
+          <input type="hidden" name="next" value="/today?date={hs(day)}">
+          <button class="btn btn-outline-light btn-sm" type="submit">Save Bet</button>
+</form>
     </div>
   </div>
   <div><span class="badge {badge_cls}">{hs(edge_str)}</span></div>
