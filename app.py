@@ -534,6 +534,9 @@ def get_game_odds_simple(game: dict, day: str) -> tuple[Optional[float], Optiona
 def bet_tier(edge: Optional[float]) -> tuple[str, str]:
     if edge is None:
         return ("-", "text-bg-secondary")
+
+    if edge >= 0.15:
+        return ("A+", "text-bg-success")
     if edge >= 0.10:
         return ("A", "text-bg-success")
     if edge >= 0.06:
@@ -2362,7 +2365,7 @@ def today_games(date: str = ""):
     <div class="fw-semibold">
       {i}. {hs(r['team'])} ML
       <span class="dark-muted">({hs(odds_str)})</span>
-      <span class="badge {tier_cls} ms-2">Tier {hs(tier)}</span>
+      <span class="badge {tier_cls} ms-2">{hs(tier)} Value</span>
     </div>
     <div class="dark-muted small">{hs(r['matchup'])}</div>
     <div class="dark-muted small">Model {hs(model_str)} • Implied {hs(implied_str)}</div>
