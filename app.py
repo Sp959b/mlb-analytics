@@ -427,8 +427,8 @@ def kelly_fraction(prob: float, odds: float) -> float:
     
 def recommended_bet_size(prob: float, odds: float) -> float:
     k = kelly_fraction(prob, odds)
-    k = k * 0.5
-    return min(k, 0.05)  # max 5% bankroll
+    k = k * 0.25
+    return min(k, 0.04)  
     
 def odds_event_day(ev: dict) -> str:
     try:
@@ -2372,10 +2372,20 @@ def today_games(date: str = ""):
 
     best_bets_html = ""
     for i, r in enumerate(best_bets, start=1):
+
+        tier, tier_cls = bet_tier(r.get("edge"))
+
         bet_pct = recommended_bet_size(
             r.get("model_prob"),
             r.get("odds")
         )
+
+        # adjust by tier
+        if tier == "A+":
+            bet_pct *= 1.1
+        elif tier == "C":
+            bet_pct *= 0.7
+
         bet_str = f"{bet_pct * 100:.1f}%"
         
         model_str = f"{(r['model_prob'] or 0) * 100:.1f}%"
