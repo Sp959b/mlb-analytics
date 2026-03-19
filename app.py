@@ -1552,7 +1552,75 @@ def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
         "home_pitcher": home_pp.get("fullName") or "tbd",
     }
     
+def today_best_bets_data(day: str, limit: int = 5) -> list[dict]:
+    day = _safe_date_yyyy_mm_dd(day)
+    season = int(day.split("-")[0])
 
+    try:
+        games = get_today_games(day)
+    except Exception:
+        games = []
+
+    rows: list[dict] = []
+
+    for g in games:
+        try:
+            probs = estimate_matchup_win_probs(g, season, day)
+
+            away_name = probs.get("away_name") or "Away"
+            home_name = probs.get("home_name") or "Home"
+
+            away_prob = probs.get("away_prob")
+            home_prob = probs.get("home_prob")
+
+            away_imp = probs.get("away_imp")
+            home_imp = probs.get("home_imp")
+
+            away_edge = probs.get("away_edge")
+            home_edge = probs.get("home_edge")
+
+            away_odds, home_odds = get_game_odds_simple(g, day)
+
+            # side rows
+            rows.append({
+                "matchup": f"{away_name} at {home_name}",
+                "team": away_name,
+                "side": "away",
+                "model_prob": away_prob,
+                "implied_prob": away_imp,
+                "edge": away_edge,
+                "odds": away_odds,
+            })
+
+            rows.append({
+                "matchup": f"{away_name} at {home_name}",
+                "team": home_name,
+                "side": "home",
+                "model_prob": home_prob,
+                "implied_prob": home_imp,
+                "edge": home_edge,
+                "odds": home_odds,
+            })
+        except Exception:
+            continue
+
+    # only keep rows with real edge values
+    rows = [r for r in rows if r.get("edge") is not None]
+
+    # best positive edges first
+    rows.sort(key=lambda r: -(r.get("edge") or -999))
+
+    return rows[:max(1, limit)]
+    
+def fmt_american(odds: Optional[float]) -> str:
+    if odds is None:
+        return "n/a"
+    try:
+        o = int(round(float(odds)))
+        return f"+{o}" if o > 0 else str(o)
+    except Exception:
+        return "n/a"    
+        
 # ----------------------------
 # Routes
 # ----------------------------
@@ -2247,6 +2315,27 @@ def today_games(date: str = ""):
     data = mlb_get("/api/v1/schedule", params={"sportId": 1, "date": day, "hydrate": "team,venue,probablePitcher"})
     dates = data.get("dates") or []
     games = (dates[0].get("games") if dates else []) or []
+    best_bets = today_best_bets_data(day, limit=5)
+
+    best_bets_html = ""
+    for i, r in enumerate(best_bets, start=1):
+        model_str = f"{(r['model_prob'] or 0) * 100:.1f}%"
+        implied_str = f"{(r['implied_prob'] or 0) * 100:.1f}%"
+        edge_str = f"{(r['edge'] or 0) * 100:+.1f}%"
+        odds_str = fmt_american(r.get("odds"))
+
+        badge_cls = "text-bg-success" if (r.get("edge") or 0) > 0 else "text-bg-secondary"
+
+        best_bets_html += f"""
+<div class="d-flex justify-content-between align-items-start py-2 border-bottom border-light border-opacity-10">
+  <div class="me-3">
+    <div class="fw-semibold">{i}. {hs(r['team'])} ML <span class="dark-muted">({hs(odds_str)})</span></div>
+    <div class="dark-muted small">{hs(r['matchup'])}</div>
+    <div class="dark-muted small">Model {hs(model_str)} • Implied {hs(implied_str)}</div>
+  </div>
+  <div><span class="badge {badge_cls}">{hs(edge_str)}</span></div>
+</div>
+"""
 
     cards = ""
     for g in games:
@@ -2365,6 +2454,14 @@ def today_games(date: str = ""):
       Shows schedule + probable pitchers. Times shown in Pacific Time.
     </div>
   </form>
+</div>
+
+<div class="card-dark mb-3">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="fw-semibold">Best Bets Today</div>
+    <div class="dark-muted small">Top moneyline edges</div>
+  </div>
+  {best_bets_html if best_bets_html else "<div class='dark-muted small'>No market edges available for this date yet.</div>"}
 </div>
 
 {cards if cards else '<div class="card-dark dark-muted">No games found for this date.</div>'}
