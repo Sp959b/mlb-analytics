@@ -1524,9 +1524,9 @@ def estimate_matchup_win_probs(game: dict, season: int, day: str) -> dict:
     home_total = home_team_score + home_pitch_score + home_off_score + home_bp_score + home_form + home_bonus
 
     diff = home_total - away_total
-    home_p = logistic_prob(diff)
-    away_p = 1.0 - home_p
-
+    scaled_diff = diff * 0.35   
+    home_p = logistic_prob(scaled_diff)
+    
     # IMPORTANT: use selected page day, not today's actual day
     away_odds, home_odds = get_game_odds_simple(game, day)
 
