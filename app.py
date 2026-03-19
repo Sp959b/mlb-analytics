@@ -1606,11 +1606,18 @@ def today_best_bets_data(day: str, limit: int = 5) -> list[dict]:
         except Exception:
             continue
 
-    # only keep rows with real edge values
-    rows = [r for r in rows if r.get("edge") is not None]
+    # only keep rows with real, positive edge values
+    rows = [r for r in rows if r.get("edge") is not None and r.get("edge", 0) > 0]
 
-    # best positive edges first
-    rows.sort(key=lambda r: -(r.get("edge") or -999))
+    # keep only the best side per matchup
+    best_by_matchup = {}
+    for r in rows:
+        key = r["matchup"]
+        if key not in best_by_matchup or r["edge"] > best_by_matchup[key]["edge"]:
+            best_by_matchup[key] = r
+
+    rows = list(best_by_matchup.values())
+    rows.sort(key=lambda r: -r["edge"])
 
     return rows[:max(1, limit)]
     
