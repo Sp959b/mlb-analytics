@@ -531,6 +531,15 @@ def get_game_odds_simple(game: dict, day: str) -> tuple[Optional[float], Optiona
     except Exception as e:
         return None, None
  
+def bet_tier(edge: Optional[float]) -> tuple[str, str]:
+    if edge is None:
+        return ("-", "text-bg-secondary")
+    if edge >= 0.10:
+        return ("A", "text-bg-success")
+    if edge >= 0.06:
+        return ("B", "text-bg-primary")
+    return ("C", "text-bg-warning")
+    
 def get_team_offense_stats(team_id: int, season: int) -> dict:
     k = f"team_off:{team_id}:{season}"
     cached = mem_get(k)
@@ -1607,8 +1616,14 @@ def today_best_bets_data(day: str, limit: int = 5) -> list[dict]:
             continue
 
     # only keep rows with real, positive edge values
-    rows = [r for r in rows if r.get("edge") is not None and r.get("edge", 0) > 0]
-
+    rows = [
+        r for r in rows
+        if r.get("edge") is not None
+        and r.get("edge", 0) >= 0.03
+        and r.get("model_prob") is not None
+        and 0.35 <= r["model_prob"] <= 0.75
+    ]
+    
     # keep only the best side per matchup
     best_by_matchup = {}
     for r in rows:
@@ -1617,7 +1632,12 @@ def today_best_bets_data(day: str, limit: int = 5) -> list[dict]:
             best_by_matchup[key] = r
 
     rows = list(best_by_matchup.values())
-    rows.sort(key=lambda r: -r["edge"])
+    rows.sort(
+        key=lambda r: (
+            -(r["edge"]),
+            -min(r.get("model_prob") or 0, 1 - (r.get("model_prob") or 0))
+        )
+    )    
 
     return rows[:max(1, limit)]
     
@@ -2332,13 +2352,18 @@ def today_games(date: str = ""):
         implied_str = f"{(r['implied_prob'] or 0) * 100:.1f}%"
         edge_str = f"{(r['edge'] or 0) * 100:+.1f}%"
         odds_str = fmt_american(r.get("odds"))
+        tier, tier_cls = bet_tier(r.get("edge"))
 
         badge_cls = "text-bg-success" if (r.get("edge") or 0) > 0 else "text-bg-secondary"
 
         best_bets_html += f"""
 <div class="d-flex justify-content-between align-items-start py-2 border-bottom border-light border-opacity-10">
   <div class="me-3">
-    <div class="fw-semibold">{i}. {hs(r['team'])} ML <span class="dark-muted">({hs(odds_str)})</span></div>
+    <div class="fw-semibold">
+      {i}. {hs(r['team'])} ML
+      <span class="dark-muted">({hs(odds_str)})</span>
+      <span class="badge {tier_cls} ms-2">Tier {hs(tier)}</span>
+    </div>
     <div class="dark-muted small">{hs(r['matchup'])}</div>
     <div class="dark-muted small">Model {hs(model_str)} • Implied {hs(implied_str)}</div>
   </div>
