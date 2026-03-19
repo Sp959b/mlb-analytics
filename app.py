@@ -409,6 +409,27 @@ def _window_series(games: list[dict], window: int, metric: str) -> list[Optional
 # ----------------------------
 # Cached MLB API helpers
 # ----------------------------
+def kelly_fraction(prob: float, odds: float) -> float:
+    if prob is None or odds is None:
+        return 0.0
+
+    # convert American odds to decimal
+    if odds > 0:
+        b = odds / 100
+    else:
+        b = 100 / abs(odds)
+
+    q = 1 - prob
+
+    k = (b * prob - q) / b
+
+    return max(0.0, k)
+    
+def recommended_bet_size(prob: float, odds: float) -> float:
+    k = kelly_fraction(prob, odds)
+    k = k * 0.5
+    return min(k, 0.05)  # max 5% bankroll
+    
 def odds_event_day(ev: dict) -> str:
     try:
         ct = ev.get("commence_time") or ""
@@ -2351,6 +2372,12 @@ def today_games(date: str = ""):
 
     best_bets_html = ""
     for i, r in enumerate(best_bets, start=1):
+        bet_pct = recommended_bet_size(
+            r.get("model_prob"),
+            r.get("odds")
+        )
+        bet_str = f"{bet_pct * 100:.1f}%"
+        
         model_str = f"{(r['model_prob'] or 0) * 100:.1f}%"
         implied_str = f"{(r['implied_prob'] or 0) * 100:.1f}%"
         edge_str = f"{(r['edge'] or 0) * 100:+.1f}%"
@@ -2368,7 +2395,9 @@ def today_games(date: str = ""):
       <span class="badge {tier_cls} ms-2">{hs(tier)} Value</span>
     </div>
     <div class="dark-muted small">{hs(r['matchup'])}</div>
-    <div class="dark-muted small">Model {hs(model_str)} • Implied {hs(implied_str)}</div>
+    <div class="dark-muted small">
+      Model {hs(model_str)} • Implied {hs(implied_str)} • Bet {hs(bet_str)} bankroll
+    </div>
   </div>
   <div><span class="badge {badge_cls}">{hs(edge_str)}</span></div>
 </div>
